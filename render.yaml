@@ -1,16 +1,13 @@
-# Render blueprint. A persistent disk requires a paid plan.
+# Render blueprint, free plan.
+# Free web services sleep after ~15 minutes without traffic and have no persistent disk, so boards are
+# forgotten when the service restarts. Fine for trying the app and for a session you run in one sitting.
+# For boards that must survive, use a paid plan with a disk (see README).
 services:
   - type: web
     name: brainstorm-app
     runtime: docker
-    plan: starter
+    plan: free
     healthCheckPath: /
-    disk:
-      name: data
-      mountPath: /data
-      sizeGB: 1
     envVars:
-      - key: DB_PATH
-        value: /data/brainstorm.db
       - key: TRUST_PROXY
         value: "1"

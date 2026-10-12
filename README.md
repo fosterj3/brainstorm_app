@@ -66,6 +66,12 @@ fly deploy
 
 The site is then at `https://<app-name>.fly.dev/`. Anyone can create boards there, so consider the abuse limits (board creation is rate limited per client, and idle boards are deleted) before sharing the address widely.
 
-**Render** (`render.yaml`): create a Blueprint from this repo. A persistent disk requires a paid plan.
+**Render, free plan** (`render.yaml`), no cost and no card needed:
+
+1. Sign in at https://render.com with GitHub and open https://dashboard.render.com/blueprint/new?repo=https://github.com/fosterj3/brainstorm_app (allow Render to read the repo when asked).
+2. Click **Deploy Blueprint**. The first build takes a few minutes.
+3. Render shows the address, like `https://brainstorm-app-xxxx.onrender.com`. That is the link anyone can use.
+
+Free plan limits: the service sleeps after about 15 minutes with no visitors (the next visit takes up to a minute to wake it), and it has no persistent disk, so **boards are forgotten when it sleeps or restarts**. Download your board as JSON (Build the board, Import and export) so you can re-import it. For boards that must survive, switch the service to a paid plan and add a disk mounted at `/app/data`.
 
 Before a live session, do a quick join from a phone. Back up the `data/` volume if the results matter to you.
