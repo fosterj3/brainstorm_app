@@ -2,6 +2,10 @@
 
 A web app for live, silent prioritization exercises. Anyone can open the site, create a board of idea cards in colored columns, send one link to their group, and see what people star. Everyone votes privately and at the same time.
 
+**Live app: https://brainstorm-app-wqbg.onrender.com**
+
+Open it, click **Facilitate a session**, and share the participant link it gives you. It runs on Render's free plan, so it sleeps after about 15 minutes without visitors (the first visit then takes up to a minute to wake it) and boards are forgotten when it sleeps or restarts. See "Hosting" below.
+
 **Status:** boards, links, voting, sync, facilitator controls, timer, results, presentation mode and CSV export are working. A 50-person load test is next (phase 5). See [CLAUDE.md](CLAUDE.md) for the rules and plan.
 
 ## How a session runs
