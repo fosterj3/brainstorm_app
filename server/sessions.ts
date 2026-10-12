@@ -6,6 +6,8 @@ import { VoteError } from "./errors";
 import { createGroupColumn, cleanColor, importBoard, parseIdeas } from "./ideas";
 
 export const MAX_SESSIONS = 5000;
+/** Page background for new boards; the facilitator can change it. */
+export const DEFAULT_BG = "#f5f3ed";
 const CODE_ALPHABET = "23456789abcdefghjkmnpqrstuvwxyz"; // no look-alike characters
 const hash = (s: string) => createHash("sha256").update(s).digest("hex");
 
@@ -39,8 +41,8 @@ export function createSession(
     } while (db.prepare("SELECT 1 FROM sessions WHERE id = ?").get(id));
 
     const adminKey = randomBytes(24).toString("base64url");
-    db.prepare("INSERT INTO sessions (id, admin_hash, title, subtitle, created_at, last_active) VALUES (?, ?, ?, ?, ?, ?)").run(
-      id, hash(adminKey), title, clip(input.subtitle, 200), now, now,
+    db.prepare("INSERT INTO sessions (id, admin_hash, title, subtitle, bg, created_at, last_active) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
+      id, hash(adminKey), title, clip(input.subtitle, 200), DEFAULT_BG, now, now,
     );
     createGroupColumn(db, id);
     if (input.template === "example") {

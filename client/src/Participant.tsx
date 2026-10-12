@@ -4,6 +4,9 @@ import type { Board as BoardData } from "./api";
 import { Board } from "./Board";
 import { Countdown } from "./Countdown";
 
+/** Make sure a subtitle ends with punctuation before more text follows it. */
+const withStop = (s: string) => (/[.!?:]$/.test(s.trim()) ? s.trim() : `${s.trim()}.`);
+
 export function Participant({ sid }: { sid: string }) {
   const [data, setData] = useState<BoardData | null>(null);
   const [offset, setOffset] = useState(0);
@@ -158,7 +161,7 @@ function Voting(props: { sid: string; data: BoardData; setData: SetData; refresh
       <main class="page wide">
         <h1>{data.board.title}</h1>
         <p class="lead">
-          {data.board.subtitle || "Choose the ideas you feel most strongly about."} Star up to {settings.votesPerPerson}. Your picks are private.
+          {withStop(data.board.subtitle || "Choose the ideas you feel most strongly about")} Star up to {settings.votesPerPerson}. Your picks are private.
         </p>
         {settings.phase === "setup" && (
           <p class="notice">

@@ -26,7 +26,7 @@ export function openDb(file: string): DB {
       admin_hash TEXT NOT NULL,
       title TEXT NOT NULL,
       subtitle TEXT NOT NULL DEFAULT '',
-      bg TEXT NOT NULL DEFAULT '#f4f5f7',
+      bg TEXT NOT NULL DEFAULT '#f5f3ed',
       created_at INTEGER NOT NULL,
       last_active INTEGER NOT NULL
     );
