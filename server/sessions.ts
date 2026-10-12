@@ -76,6 +76,39 @@ export function updateBoardMeta(db: DB, sid: string, patch: { title?: string; su
   })();
 }
 
+export interface BoardSummary {
+  id: string;
+  title: string;
+  phase: string;
+  ideas: number;
+  joined: number;
+  submitted: number;
+  createdAt: number;
+  lastActive: number;
+}
+
+/** A short status line for the facilitator's "my boards" list. Headcounts only. */
+export function getSummary(db: DB, sid: string): BoardSummary | null {
+  const meta = db.prepare("SELECT id, title, created_at AS createdAt, last_active AS lastActive FROM sessions WHERE id = ?").get(sid) as
+    | { id: string; title: string; createdAt: number; lastActive: number }
+    | undefined;
+  if (!meta) return null;
+  const n = (sql: string) => (db.prepare(sql).get(sid) as { n: number }).n;
+  const phase = (db.prepare("SELECT value FROM settings WHERE session_id = ? AND key = 'phase'").get(sid) as { value: string } | undefined)?.value ?? "setup";
+  return {
+    ...meta,
+    phase,
+    ideas: n("SELECT COUNT(*) AS n FROM ideas WHERE session_id = ?"),
+    joined: n("SELECT COUNT(*) AS n FROM participants WHERE session_id = ?"),
+    submitted: n("SELECT COUNT(*) AS n FROM participants WHERE session_id = ? AND submitted = 1"),
+  };
+}
+
+/** Permanently delete a board with its columns, ideas, people and votes. */
+export function deleteSession(db: DB, sid: string): boolean {
+  return db.prepare("DELETE FROM sessions WHERE id = ?").run(sid).changes > 0;
+}
+
 export function touch(db: DB, sid: string, now = Date.now()) {
   db.prepare("UPDATE sessions SET last_active = ? WHERE id = ?").run(now, sid);
 }

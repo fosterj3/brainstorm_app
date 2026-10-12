@@ -95,6 +95,16 @@ export class Hub {
     for (const [ws, r] of this.roles) if (r.sid === sid) this.send(ws, data);
   }
 
+  /** The board was deleted: tell everyone in it, then close their connections. */
+  closeSession(sid: string) {
+    const data = JSON.stringify({ type: "deleted" });
+    for (const [ws, r] of this.roles) {
+      if (r.sid !== sid) continue;
+      this.send(ws, data);
+      ws.close(1000, "deleted");
+    }
+  }
+
   close() {
     clearInterval(this.timer);
     for (const ws of this.roles.keys()) ws.terminate();

@@ -21,6 +21,10 @@ Open it, click **Facilitate a session**, and share the participant link it gives
 
 CSV import: a header row with `title`, and optionally `column`, `summary`, `details`, `audience`, `code`. Columns are created as needed. JSON import also accepts a `columns` list with colors. See `ideas.example.json`.
 
+**Your boards.** The home page lists the boards you have created on this device, with their status (setting up, voting, locked, results showing), how many people have joined and submitted, and when they were last used. From there you can open a board again, copy its participant link, or delete it. You can also delete a board from the bottom of its "Run the session" tab. Deleting erases the board, its ideas, people and votes, and participants are told the session has ended. The list is stored in this browser, so keep your private facilitator links to get back in from another device. People who joined a session see it listed under "Sessions you have joined".
+
+**Adding ideas closes when voting starts.** Participants can only add their own ideas before you start voting, so the app reminds you before you start (with a confirmation that says so), reminds participants while they are waiting, and shows them a "closed" tile once voting has begun. You can still edit the board yourself afterwards.
+
 Boards that nobody has used for 90 days are deleted automatically.
 
 ## Run locally

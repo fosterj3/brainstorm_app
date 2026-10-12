@@ -31,11 +31,19 @@ export function Participant({ sid }: { sid: string }) {
       onStatus: setOnline,
       onPush: (m) => {
         if (m.type === "refresh") refresh();
+        else if (m.type === "deleted") {
+          setError("The facilitator has ended this session.");
+          setData(null);
+        }
         else if (m.type === "ideas") setData((d) => (d ? { ...d, ideas: m.ideas } : d));
         else if (m.type === "votes") setData((d) => (d && d.me ? { ...d, me: { ...d.me, votes: m.votes } } : d));
       },
     });
   }, [joined]);
+
+  useEffect(() => {
+    if (data?.me) api.rememberJoined(sid, data.board.title);
+  }, [data?.me?.name, data?.board.title]);
 
   // Tint the page with the facilitator's chosen background.
   useEffect(() => {
@@ -46,7 +54,7 @@ export function Participant({ sid }: { sid: string }) {
   if (error && !data) {
     return (
       <main class="page narrow">
-        <h1>Session not found</h1>
+        <h1>This session isn't available</h1>
         <p role="alert" class="error">{error}</p>
         <p><a href="/">Go to the home page</a></p>
       </main>
@@ -105,6 +113,7 @@ function Voting(props: { sid: string; data: BoardData; setData: SetData; refresh
   const voting = settings.phase === "voting";
   const { timer } = settings;
   const canSuggest = settings.ideasOpen && settings.phase === "setup" && settings.ideasPerPerson - me!.ideasAdded > 0;
+  const ideasClosed = settings.ideasOpen && settings.phase !== "setup";
 
   const setVotes = (next: number[]) => setData((d) => (d && d.me ? { ...d, me: { ...d.me, votes: next } } : d));
 
@@ -151,7 +160,15 @@ function Voting(props: { sid: string; data: BoardData; setData: SetData; refresh
         <p class="lead">
           {data.board.subtitle || "Choose the ideas you feel most strongly about."} Star up to {settings.votesPerPerson}. Your picks are private.
         </p>
-        {settings.phase === "setup" && <p class="notice">Waiting for the facilitator to start voting. You can read the ideas now.</p>}
+        {settings.phase === "setup" && (
+          <p class="notice">
+            Waiting for the facilitator to start voting. You can read the ideas now.
+            {settings.ideasOpen && <> You can also add your own idea, but <strong>only until voting starts</strong>.</>}
+          </p>
+        )}
+        {settings.phase !== "setup" && settings.ideasOpen && (
+          <p class="notice" role="note">Voting has started, so new ideas can't be added any more.</p>
+        )}
         {settings.phase === "locked" && <p class="notice">Voting is locked. Your stars are saved.</p>}
         {settings.phase === "revealed" && <p class="notice">Voting is closed and the facilitator is sharing the results. Your stars are saved.</p>}
         {voting && timer.state === "paused" && <p class="notice">The facilitator paused the timer.</p>}
@@ -177,8 +194,12 @@ function Voting(props: { sid: string; data: BoardData; setData: SetData; refresh
           columns={columns}
           ideas={ideas}
           vote={{ votes, enabled: voting, full, onToggle: toggle }}
-          showEmptyGroup={canSuggest}
-          groupExtra={canSuggest ? <SuggestTile sid={sid} left={settings.ideasPerPerson - me!.ideasAdded} onAdded={refresh} /> : undefined}
+          showEmptyGroup={canSuggest || ideasClosed}
+          groupExtra={
+            canSuggest ? <SuggestTile sid={sid} left={settings.ideasPerPerson - me!.ideasAdded} onAdded={refresh} />
+            : ideasClosed ? <div class="add-tile closed" role="note"><strong>Adding ideas is closed</strong><span class="hint">New ideas can only be added before voting starts.</span></div>
+            : undefined
+          }
         />
       </main>
     </>
@@ -212,7 +233,7 @@ function SuggestTile({ sid, left, onAdded }: { sid: string; left: number; onAdde
       <button class="add-tile" onClick={() => setOpen(true)}>
         <span class="plus" aria-hidden="true">+</span>
         <strong>Add your own idea</strong>
-        <span class="hint">It joins the board for everyone to star. {left} left.</span>
+        <span class="hint">It joins the board for everyone to star. {left} left. You can add ideas until voting starts.</span>
       </button>
     );
   }

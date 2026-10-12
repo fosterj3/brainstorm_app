@@ -87,6 +87,7 @@ export type Push =
   | { type: "ideas"; ideas: Idea[] }
   | { type: "votes"; votes: number[] }
   | { type: "refresh" }
+  | { type: "deleted" }
   | ({ type: "counts" } & Counts);
 
 export class ApiError extends Error {
@@ -118,6 +119,36 @@ export function myBoards(): { id: string; title: string }[] {
 export function rememberBoard(id: string, title: string) {
   const rest = myBoards().filter((b) => b.id !== id);
   localStorage.setItem(BOARDS_KEY, JSON.stringify([{ id, title }, ...rest].slice(0, 30)));
+}
+
+/** Sessions this browser has joined as a participant, so people can find their way back. */
+const JOINED_KEY = "brainstorm.joined";
+export function joinedSessions(): { id: string; title: string }[] {
+  try {
+    const list = JSON.parse(localStorage.getItem(JOINED_KEY) ?? "[]") as { id: string; title: string }[];
+    return list.filter((b) => getToken(b.id));
+  } catch {
+    return [];
+  }
+}
+export function rememberJoined(id: string, title: string) {
+  const rest = joinedSessions().filter((b) => b.id !== id);
+  localStorage.setItem(JOINED_KEY, JSON.stringify([{ id, title }, ...rest].slice(0, 30)));
+}
+/** Forget a session on this device only. Nothing is deleted from the server. */
+export function forgetJoined(id: string) {
+  localStorage.removeItem(tokenKey(id));
+}
+
+export interface BoardSummary {
+  id: string;
+  title: string;
+  phase: Phase;
+  ideas: number;
+  joined: number;
+  submitted: number;
+  createdAt: number;
+  lastActive: number;
 }
 
 async function call<T>(method: string, url: string, headers: Record<string, string>, body?: unknown): Promise<T> {
@@ -211,6 +242,8 @@ const A = (sid: string, path: string) => `/api/s/${sid}/admin/${path}`;
 export type IdeaInput = Partial<Pick<Idea, "columnId" | "title" | "summary" | "details" | "audience" | "code">>;
 export type ColumnInput = Partial<Pick<Column, "name" | "description" | "color">>;
 
+export const adminSummary = (sid: string) => call<BoardSummary>("GET", `/api/s/${sid}/admin/summary`, aHeaders(sid));
+export const adminDeleteBoard = (sid: string) => call<{ ok: true }>("DELETE", `/api/s/${sid}` + "/admin", aHeaders(sid));
 export const adminState = (sid: string) => call<FacilitatorState>("GET", A(sid, "state"), aHeaders(sid));
 export const adminBoard = (sid: string, patch: Partial<Pick<BoardMeta, "title" | "subtitle" | "bg">>) =>
   call<{ ok: true }>("PUT", A(sid, "board"), aHeaders(sid), patch);

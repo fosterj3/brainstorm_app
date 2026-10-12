@@ -95,6 +95,7 @@ function Dashboard({ sid, onLostAccess }: { sid: string; onLostAccess: () => voi
           <span class="phase" data-phase={phase}>{PHASE_LABEL[phase]}</span>
           {timer.state !== "stopped" && <Countdown timer={timer} offset={offset} />}
           <span class="hint">{counts.submitted} of {counts.joined} submitted</span>
+          <a href="/" class="hint">My boards</a>
         </div>
         {!online && <p class="offline" role="status">Reconnecting…</p>}
       </header>
@@ -123,9 +124,19 @@ function Dashboard({ sid, onLostAccess }: { sid: string; onLostAccess: () => voi
               <SharePanel sid={sid} counts={counts} />
               <Controls sid={sid} state={state} run={run} onRevealed={() => setTab("results")} onPresent={() => setPresenting(true)} />
               <SettingsPanel sid={sid} state={state} run={run} />
+              <DeletePanel sid={sid} title={state.board.title} run={run} />
             </>
           )}
-          {tab === "build" && <BoardEditor sid={sid} state={state} run={run} />}
+          {tab === "build" && (
+            <>
+              {phase !== "setup" && (
+                <p class="notice warn" role="note">
+                  Voting has started, so participants can no longer add their own ideas. You can still edit the board yourself, but changing or deleting ideas now affects the votes already cast.
+                </p>
+              )}
+              <BoardEditor sid={sid} state={state} run={run} />
+            </>
+          )}
           {tab === "preview" && <Preview state={state} />}
           {tab === "results" && (
             <ResultsPanel sid={sid} title={state.board.title} columns={state.columns} revealed={settings.phase === "revealed"} onPresent={() => setPresenting(true)} run={run} />
@@ -207,6 +218,10 @@ function Controls({ sid, state, run, onRevealed, onPresent }: { sid: string; sta
   const { settings } = state;
   const { phase, timer } = settings;
   const noIdeas = state.ideas.length === 0;
+  const suggested = state.ideas.filter((i) => i.author).length;
+  const startWarning = `Start voting now?
+
+Once voting starts, participants can no longer add their own ideas${suggested ? ` (${suggested} suggested so far)` : ""}. You can still edit the board yourself.`;
   const startLabel = timer.durationSec ? `Start voting (${fmtDuration(timer.durationSec)} timer)` : "Start voting (no timer)";
   const act = (action: string, seconds?: number) => run(() => api.adminAction(sid, action, seconds));
 
@@ -216,8 +231,12 @@ function Controls({ sid, state, run, onRevealed, onPresent }: { sid: string; sta
       {phase === "setup" && (
         <>
           <TimerPicker sid={sid} durationSec={timer.durationSec} run={run} />
+          <p class="notice warn" role="note">
+            <strong>Heads up:</strong> once you start voting, participants can no longer add their own ideas. Finish adding ideas first.
+            {suggested > 0 && <> {suggested} {suggested === 1 ? "idea has" : "ideas have"} been suggested by participants so far.</>}
+          </p>
           <p class="row">
-            <button class="primary" disabled={noIdeas} onClick={() => act("start")}>{startLabel}</button>
+            <button class="primary" disabled={noIdeas} onClick={() => confirm(startWarning) && act("start")}>{startLabel}</button>
             {noIdeas && <span class="hint">Add ideas on the “Build the board” tab first.</span>}
           </p>
         </>
@@ -244,6 +263,7 @@ function Controls({ sid, state, run, onRevealed, onPresent }: { sid: string; sta
       {phase === "revealed" && (
         <div class="row wrap">
           <button class="primary" onClick={onPresent}>Present full screen</button>
+          <button class="secondary" onClick={() => run(() => api.downloadResultsCsv(sid, state.board.title))}>Download results (CSV)</button>
           <button class="secondary" onClick={() => act("hide")}>Hide results</button>
         </div>
       )}
@@ -323,6 +343,26 @@ function SettingsPanel({ sid, state, run }: { sid: string; state: FacilitatorSta
           <span class="hint">Off: time runs out and you decide when to lock.</span>
         </div>
       </div>
+    </section>
+  );
+}
+
+function DeletePanel({ sid, title, run }: { sid: string; title: string; run: Run }) {
+  const remove = () => {
+    if (!confirm(`Delete "${title}" for good?
+
+Its ideas, participants and votes are erased, participants lose access, and its links stop working. Download the results first if you need them. This cannot be undone.`)) return;
+    run(async () => {
+      await api.adminDeleteBoard(sid);
+      api.forgetAdminKey(sid);
+      location.assign("/");
+    });
+  };
+  return (
+    <section class="panel danger-zone" aria-labelledby="h-delete">
+      <h2 id="h-delete">Delete this board</h2>
+      <p class="hint">Removes the board, its ideas, participants and votes. Boards are also deleted automatically after 90 days without use.</p>
+      <button class="danger" onClick={remove}>Delete this board</button>
     </section>
   );
 }

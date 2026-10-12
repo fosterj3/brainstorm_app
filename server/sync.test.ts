@@ -401,3 +401,36 @@ describe("results", () => {
     expect((await results(b)).status).toBe(409);
   });
 });
+
+describe("my boards: summary and delete over the API", () => {
+  it("summary needs the facilitator key and shows headcounts", async () => {
+    const b = await makeBoard();
+    await join(b.sid, "Alex");
+    expect((await api("GET", `/api/s/${b.sid}/admin/summary`)).status).toBe(401);
+    const r = await api("GET", `/api/s/${b.sid}/admin/summary`, asAdmin(b.key));
+    expect(r.body).toMatchObject({ id: b.sid, title: "Test board", phase: "setup", ideas: 2, joined: 1 });
+  });
+
+  it("delete needs the key of that board, and removes it for everyone", async () => {
+    const [a, other] = [await makeBoard(), await makeBoard()];
+    const alex = await join(a.sid, "Alex");
+    expect((await api("DELETE", `/api/s/${a.sid}/admin`)).status).toBe(401);
+    expect((await api("DELETE", `/api/s/${a.sid}/admin`, as(alex))).status).toBe(401);
+    expect((await api("DELETE", `/api/s/${a.sid}/admin`, asAdmin(other.key))).status).toBe(401);
+    expect((await api("GET", `/api/s/${a.sid}/board`)).status).toBe(200); // still there
+
+    const ca = await connect(`session=${a.sid}&token=${alex}`);
+    const closed = new Promise((r) => ca.ws.once("close", r));
+    expect((await api("DELETE", `/api/s/${a.sid}/admin`, asAdmin(a.key))).status).toBe(200);
+    await closed;
+    expect(ca.messages.some((m) => m.type === "deleted")).toBe(true);
+
+    expect((await api("GET", `/api/s/${a.sid}/board`)).status).toBe(404);
+    expect((await api("GET", `/api/s/${a.sid}/exists`)).status).toBe(404);
+    expect((await api("GET", `/api/s/${a.sid}/admin/state`, asAdmin(a.key))).status).toBe(401);
+    expect((await api("POST", `/api/s/${a.sid}/join`, {}, { name: "Late" })).status).toBe(404);
+    // the other board is untouched
+    expect((await api("GET", `/api/s/${other.sid}/board`)).status).toBe(200);
+    expect((await api("GET", `/api/s/${other.sid}/admin/state`, asAdmin(other.key))).status).toBe(200);
+  });
+});

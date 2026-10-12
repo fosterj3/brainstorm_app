@@ -12,7 +12,7 @@ import {
   mergeIdeas, moveColumn, parseIdeas, updateColumn, updateIdea,
 } from "./ideas";
 import { applyAction, getSettings, reconcile, updateSettings, type Action } from "./session";
-import { createSession, getBoardMeta, purgeIdle, sessionsWithRunningTimer, touch, updateBoardMeta, verifyAdmin } from "./sessions";
+import { createSession, deleteSession, getBoardMeta, getSummary, purgeIdle, sessionsWithRunningTimer, touch, updateBoardMeta, verifyAdmin } from "./sessions";
 import { addIdea, countIdeasBy, getCounts, getParticipant, getVotes, join, setSubmitted, setVote } from "./votes";
 
 export interface AppOptions {
@@ -160,6 +160,17 @@ export function buildApp(db: DB, opts: AppOptions = {}) {
 
     type P = { Params: { sid: string } };
     type PI = { Params: { sid: string; id: string } };
+
+    fac.get<P>("/api/s/:sid/admin/summary", async (req) => getSummary(db, req.params.sid));
+
+    fac.delete<P>("/api/s/:sid/admin", async (req) => {
+      const sid = req.params.sid;
+      deleteSession(db, sid);
+      clearTimeout(expiry.get(sid));
+      expiry.delete(sid);
+      hub.closeSession(sid);
+      return { ok: true };
+    });
 
     fac.get<P>("/api/s/:sid/admin/state", async (req) => {
       const sid = req.params.sid;

@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { openDb } from "./db";
 import { listColumns, listIdeas } from "./ideas";
-import { createSession, getBoardMeta, purgeIdle, updateBoardMeta, verifyAdmin } from "./sessions";
+import { createSession, deleteSession, getBoardMeta, getSummary, purgeIdle, updateBoardMeta, verifyAdmin } from "./sessions";
+import { applyAction } from "./session";
+import { join, setSubmitted, setVote } from "./votes";
 import { VoteError } from "./errors";
 
 const code = (fn: () => unknown) => {
@@ -74,5 +76,44 @@ describe("cleanup", () => {
     expect(getBoardMeta(db, fresh)).not.toBeNull();
     expect((db.prepare("SELECT COUNT(*) AS n FROM ideas WHERE session_id = ?").get(old) as { n: number }).n).toBe(0);
     expect((db.prepare("SELECT COUNT(*) AS n FROM columns WHERE session_id = ?").get(old) as { n: number }).n).toBe(0);
+  });
+});
+
+describe("my boards: summary and delete", () => {
+  it("summarises a board with headcounts and phase only", () => {
+    const db = openDb(":memory:");
+    const id = createSession(db, { title: "Mine", template: "example" }, 5).id;
+    const a = join(db, id, "Ann").token;
+    join(db, id, "Ben");
+    applyAction(db, id, "start", 10);
+    setVote(db, id, a, 1, true);
+    setSubmitted(db, id, a, true);
+    const s = getSummary(db, id)!;
+    expect(s).toMatchObject({ id, title: "Mine", phase: "voting", joined: 2, submitted: 1, createdAt: 5 });
+    expect(s.ideas).toBeGreaterThan(3);
+    expect(Object.keys(s)).not.toContain("votes");
+    expect(getSummary(db, "nope")).toBeNull();
+  });
+  it("deletes a board with everything in it and leaves other boards alone", () => {
+    const db = openDb(":memory:");
+    const gone = createSession(db, { title: "Gone", template: "example" }, 0).id;
+    const kept = createSession(db, { title: "Kept", template: "example" }, 0).id;
+    const t1 = join(db, gone, "Ann").token;
+    const t2 = join(db, kept, "Ann").token;
+    applyAction(db, gone, "start", 1);
+    applyAction(db, kept, "start", 1);
+    setVote(db, gone, t1, 1, true);
+    const keptIdea = (db.prepare("SELECT id FROM ideas WHERE session_id = ? LIMIT 1").get(kept) as { id: number }).id;
+    setVote(db, kept, t2, keptIdea, true);
+
+    expect(deleteSession(db, gone)).toBe(true);
+    expect(getBoardMeta(db, gone)).toBeNull();
+    for (const table of ["columns", "ideas", "participants", "settings"]) {
+      expect((db.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE session_id = ?`).get(gone) as { n: number }).n).toBe(0);
+    }
+    expect((db.prepare("SELECT COUNT(*) AS n FROM votes WHERE token = ?").get(t1) as { n: number }).n).toBe(0);
+    expect(getSummary(db, kept)).toMatchObject({ joined: 1 });
+    expect((db.prepare("SELECT COUNT(*) AS n FROM votes WHERE token = ?").get(t2) as { n: number }).n).toBe(1);
+    expect(deleteSession(db, gone)).toBe(false);
   });
 });
