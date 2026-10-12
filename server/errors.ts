@@ -3,6 +3,8 @@ export type ErrorCode =
   | "not_started"
   | "cap_reached"
   | "unknown_idea"
+  | "unknown_column"
+  | "unknown_session"
   | "unknown_participant"
   | "name_taken"
   | "name_required"
@@ -13,8 +15,8 @@ export type ErrorCode =
   | "bad_input"
   | "nothing_to_submit"
   | "unauthorized"
-  | "not_configured"
-  | "rate_limited";
+  | "rate_limited"
+  | "full";
 
 export type VoteErrorCode = ErrorCode;
 
@@ -29,6 +31,8 @@ export const HTTP_STATUS: Record<ErrorCode, number> = {
   not_started: 403,
   cap_reached: 409,
   unknown_idea: 404,
+  unknown_column: 404,
+  unknown_session: 404,
   unknown_participant: 401,
   name_taken: 409,
   name_required: 400,
@@ -39,6 +43,6 @@ export const HTTP_STATUS: Record<ErrorCode, number> = {
   bad_input: 400,
   nothing_to_submit: 409,
   unauthorized: 401,
-  not_configured: 503,
   rate_limited: 429,
+  full: 409,
 };

@@ -3,53 +3,61 @@ import fastifyStatic from "@fastify/static";
 import fs from "node:fs";
 import path from "node:path";
 import { openDb, type DB } from "./db";
-import { createAuth, createThrottle } from "./auth";
+import { createThrottle } from "./auth";
 import { HTTP_STATUS, VoteError } from "./errors";
 import { Hub } from "./hub";
 import {
-  createIdea, deleteIdea, importIdeas, listIdeasForFacilitator, mergeIdeas, parseIdeas, updateIdea,
+  createColumn, createIdea, deleteColumn, deleteIdea, exportBoard, importBoard, listColumns, listIdeas, listIdeasForFacilitator,
+  mergeIdeas, moveColumn, parseIdeas, updateColumn, updateIdea,
 } from "./ideas";
 import { applyAction, getSettings, reconcile, updateSettings, type Action } from "./session";
-import {
-  addIdea, countIdeasBy, getCounts, getParticipant, getVotes, insertIdeas, join, listIdeas, setSubmitted, setVote,
-} from "./votes";
+import { createSession, getBoardMeta, purgeIdle, sessionsWithRunningTimer, touch, updateBoardMeta, verifyAdmin } from "./sessions";
+import { addIdea, countIdeasBy, getCounts, getParticipant, getVotes, join, setSubmitted, setVote } from "./votes";
 
 export interface AppOptions {
-  /** Facilitator passcode. When missing, the facilitator view is disabled. */
-  passcode?: string;
   now?: () => number;
-  /** Set when running behind a hosting proxy so the real client IP (not the proxy's) is used for the passcode throttle. */
+  /** Set when running behind a hosting proxy so the real client IP (not the proxy's) is used for rate limits. */
   trustProxy?: boolean;
+  /** Boards created per client per hour. */
+  createLimit?: number;
 }
 
 const ACTIONS: Action[] = ["start", "pause", "resume", "extend", "lock", "reopen"];
+const IDLE_MS = 90 * 24 * 60 * 60 * 1000;
 
 export function buildApp(db: DB, opts: AppOptions = {}) {
   const now = opts.now ?? Date.now;
   const app = Fastify({ logger: false, trustProxy: opts.trustProxy ?? false });
-  const auth = createAuth(opts.passcode, now);
-  const throttle = createThrottle(5, 60_000, now);
-  const hub = new Hub(app.server, db, auth.verify);
+  const createThrottled = createThrottle(opts.createLimit ?? 10, 60 * 60 * 1000, now);
+  const hub = new Hub(app.server, db);
 
-  const counts = () => ({ ...getCounts(db), connected: hub.connected() });
-  const pushCounts = () => hub.toFacilitators({ type: "counts", ...counts() });
+  const counts = (sid: string) => ({ ...getCounts(db, sid), connected: hub.connected(sid) });
+  const pushCounts = (sid: string) => hub.toFacilitators(sid, { type: "counts", ...counts(sid) });
   hub.onPresence = pushCounts;
 
-  // When a running timer reaches zero, mark it ended (and auto-lock if chosen), then tell everyone.
-  let expiry: NodeJS.Timeout | undefined;
-  const scheduleExpiry = () => {
-    clearTimeout(expiry);
-    const { timer } = getSettings(db);
+  // When a running timer reaches zero, mark it ended (and auto-lock if chosen), then tell everyone in that session.
+  const expiry = new Map<string, NodeJS.Timeout>();
+  const scheduleExpiry = (sid: string) => {
+    clearTimeout(expiry.get(sid));
+    expiry.delete(sid);
+    const { timer } = getSettings(db, sid);
     if (timer.state !== "running" || timer.endsAt === null) return;
-    expiry = setTimeout(() => {
-      if (reconcile(db, now())) hub.refreshAll();
-      scheduleExpiry();
+    const t = setTimeout(() => {
+      if (reconcile(db, sid, now())) hub.refreshAll(sid);
+      scheduleExpiry(sid);
     }, Math.max(0, timer.endsAt - now()) + 20);
-    expiry.unref();
+    t.unref();
+    expiry.set(sid, t);
   };
-  scheduleExpiry();
+  for (const sid of sessionsWithRunningTimer(db)) scheduleExpiry(sid);
+
+  purgeIdle(db, now(), IDLE_MS);
+  const purger = setInterval(() => purgeIdle(db, now(), IDLE_MS), 6 * 60 * 60 * 1000);
+  purger.unref();
+
   app.addHook("onClose", async () => {
-    clearTimeout(expiry);
+    clearInterval(purger);
+    for (const t of expiry.values()) clearTimeout(t);
     hub.close();
   });
 
@@ -59,86 +67,122 @@ export function buildApp(db: DB, opts: AppOptions = {}) {
     return reply.code(500).send({ error: "server_error", message: "Something went wrong." });
   });
 
-  // ---- participants -----------------------------------------------------------------------
+  // ---- creating a board -------------------------------------------------------------------
 
-  const tokenOf = (req: FastifyRequest) => String(req.headers["x-participant-token"] ?? "");
-
-  app.post("/api/join", async (req) => {
-    const body = (req.body ?? {}) as { name?: string; token?: string };
-    const result = join(db, body.name ?? "", body.token);
-    pushCounts();
-    hub.toFacilitators({ type: "refresh" });
+  app.post<{ Body: { title?: string; subtitle?: string; template?: string } }>("/api/sessions", async (req) => {
+    if (createThrottled.blocked(req.ip)) throw new VoteError("rate_limited", "You have created a lot of boards recently. Please try again later.");
+    const result = createSession(db, req.body ?? {}, now());
+    createThrottled.record(req.ip);
     return result;
   });
 
-  app.get("/api/session", async (req) => {
-    reconcile(db, now());
-    const me = getParticipant(db, tokenOf(req));
+  /** Looks up a session for the join screen without revealing anything private. */
+  app.get<{ Params: { sid: string } }>("/api/s/:sid/exists", async (req) => {
+    const meta = getBoardMeta(db, req.params.sid);
+    if (!meta) throw new VoteError("unknown_session", "We could not find that session. Check the link or code.");
+    return { title: meta.title };
+  });
+
+  // ---- participants -----------------------------------------------------------------------
+
+  const tokenOf = (req: FastifyRequest) => String(req.headers["x-participant-token"] ?? "");
+  const sidOf = (req: FastifyRequest) => {
+    const sid = String((req.params as { sid?: string }).sid ?? "");
+    if (!getBoardMeta(db, sid)) throw new VoteError("unknown_session", "We could not find that session. Check the link or code.");
+    return sid;
+  };
+
+  app.post<{ Params: { sid: string } }>("/api/s/:sid/join", async (req) => {
+    const sid = sidOf(req);
+    const body = (req.body ?? {}) as { name?: string; token?: string };
+    const result = join(db, sid, body.name ?? "", body.token);
+    touch(db, sid, now());
+    pushCounts(sid);
+    hub.toFacilitators(sid, { type: "refresh" });
+    return result;
+  });
+
+  app.get<{ Params: { sid: string } }>("/api/s/:sid/board", async (req) => {
+    const sid = sidOf(req);
+    reconcile(db, sid, now());
+    const me = getParticipant(db, sid, tokenOf(req));
     return {
       serverNow: now(),
-      settings: getSettings(db),
-      ideas: listIdeas(db),
-      me: me && { name: me.name, votes: getVotes(db, me.token), ideasAdded: countIdeasBy(db, me.token), submitted: !!me.submitted },
+      board: getBoardMeta(db, sid),
+      settings: getSettings(db, sid),
+      columns: listColumns(db, sid),
+      ideas: listIdeas(db, sid),
+      me: me && { name: me.name, votes: getVotes(db, sid, me.token), ideasAdded: countIdeasBy(db, sid, me.token), submitted: !!me.submitted },
     };
   });
 
-  app.put<{ Params: { id: string }; Body: { starred?: boolean } }>("/api/votes/:id", async (req) => {
+  app.put<{ Params: { sid: string; id: string }; Body: { starred?: boolean } }>("/api/s/:sid/votes/:id", async (req) => {
+    const sid = sidOf(req);
     const token = tokenOf(req);
-    const votes = setVote(db, token, Number(req.params.id), req.body?.starred === true, now());
-    hub.sendToToken(token, { type: "votes", votes }); // keeps a second tab/device in step
+    const votes = setVote(db, sid, token, Number(req.params.id), req.body?.starred === true, now());
+    hub.sendToToken(sid, token, { type: "votes", votes }); // keeps a second tab/device in step
     return { votes };
   });
 
-  app.put<{ Body: { submitted?: boolean } }>("/api/submitted", async (req) => {
+  app.put<{ Params: { sid: string }; Body: { submitted?: boolean } }>("/api/s/:sid/submitted", async (req) => {
+    const sid = sidOf(req);
     const token = tokenOf(req);
-    const submitted = setSubmitted(db, token, req.body?.submitted !== false, now());
-    hub.sendToToken(token, { type: "refresh" });
-    pushCounts();
+    const submitted = setSubmitted(db, sid, token, req.body?.submitted !== false, now());
+    hub.sendToToken(sid, token, { type: "refresh" });
+    pushCounts(sid);
     return { submitted };
   });
 
-  app.post<{ Body: { title?: string; description?: string; theme?: string } }>("/api/ideas", async (req) => {
+  app.post<{ Params: { sid: string }; Body: { title?: string; summary?: string } }>("/api/s/:sid/ideas", async (req) => {
+    const sid = sidOf(req);
     const token = tokenOf(req);
-    const idea = addIdea(db, token, req.body ?? {}, now());
-    hub.broadcast({ type: "ideas", ideas: listIdeas(db) });
-    hub.toFacilitators({ type: "refresh" });
-    return { idea, ideasAdded: countIdeasBy(db, token) };
+    const idea = addIdea(db, sid, token, req.body ?? {}, now());
+    hub.broadcast(sid, { type: "ideas", ideas: listIdeas(db, sid) });
+    hub.toFacilitators(sid, { type: "refresh" });
+    return { idea, ideasAdded: countIdeasBy(db, sid, token) };
   });
 
-  // ---- facilitator ------------------------------------------------------------------------
+  // ---- facilitator (secret key in the x-admin-key header) ----------------------------------
 
-  app.post<{ Body: { passcode?: string } }>("/api/facilitator/login", async (req) => {
-    if (!auth.enabled) throw new VoteError("not_configured", "The facilitator view is not set up. Set FACILITATOR_PASSCODE on the server.");
-    if (throttle.blocked(req.ip)) throw new VoteError("rate_limited", "Too many attempts. Wait a minute and try again.");
-    const token = auth.login(String(req.body?.passcode ?? ""));
-    if (!token) {
-      throttle.fail(req.ip);
-      throw new VoteError("unauthorized", "That passcode is not right.");
-    }
-    return { token };
-  });
-
-  // Everything under /api/facilitator (except login) needs a valid facilitator token.
   app.register(async (fac) => {
     fac.addHook("preHandler", async (req) => {
-      if (!auth.verify(String(req.headers["x-facilitator-token"] ?? ""))) throw new VoteError("unauthorized", "Please sign in again.");
+      const sid = String((req.params as { sid?: string }).sid ?? "");
+      if (!verifyAdmin(db, sid, String(req.headers["x-admin-key"] ?? ""))) throw new VoteError("unauthorized", "This facilitator link is not valid.");
+      touch(db, sid, now());
     });
 
-    /** After any change, make every screen refetch and re-arm the timer. */
-    const changed = () => {
-      scheduleExpiry();
-      hub.refreshAll();
+    /** After any change, make every screen in the session refetch and re-arm the timer. */
+    const changed = (sid: string) => {
+      scheduleExpiry(sid);
+      hub.refreshAll(sid);
     };
 
-    fac.get("/api/facilitator/state", async () => {
-      reconcile(db, now());
+    type P = { Params: { sid: string } };
+    type PI = { Params: { sid: string; id: string } };
+
+    fac.get<P>("/api/s/:sid/admin/state", async (req) => {
+      const sid = req.params.sid;
+      reconcile(db, sid, now());
       // Headcounts only. What individuals picked is never returned here.
-      return { serverNow: now(), settings: getSettings(db), ideas: listIdeasForFacilitator(db), counts: counts() };
+      return {
+        serverNow: now(),
+        board: getBoardMeta(db, sid),
+        settings: getSettings(db, sid),
+        columns: listColumns(db, sid),
+        ideas: listIdeasForFacilitator(db, sid),
+        counts: counts(sid),
+      };
     });
 
-    fac.put<{ Body: Record<string, unknown> }>("/api/facilitator/settings", async (req) => {
+    fac.put<P & { Body: { title?: string; subtitle?: string; bg?: string } }>("/api/s/:sid/admin/board", async (req) => {
+      updateBoardMeta(db, req.params.sid, req.body ?? {});
+      changed(req.params.sid);
+      return { ok: true };
+    });
+
+    fac.put<P & { Body: Record<string, unknown> }>("/api/s/:sid/admin/settings", async (req) => {
       const b = req.body ?? {};
-      updateSettings(db, {
+      updateSettings(db, req.params.sid, {
         votesPerPerson: b.votesPerPerson as number | undefined,
         ideasPerPerson: b.ideasPerPerson as number | undefined,
         ideasOpen: b.ideasOpen as boolean | undefined,
@@ -146,72 +190,90 @@ export function buildApp(db: DB, opts: AppOptions = {}) {
         autoLock: b.autoLock as boolean | undefined,
         timerSeconds: b.timerSeconds as number | null | undefined,
       });
-      changed();
+      changed(req.params.sid);
       return { ok: true };
     });
 
-    fac.post<{ Body: { action?: Action; seconds?: number } }>("/api/facilitator/action", async (req) => {
+    fac.post<P & { Body: { action?: Action; seconds?: number } }>("/api/s/:sid/admin/action", async (req) => {
       const action = req.body?.action;
       if (!action || !ACTIONS.includes(action)) throw new VoteError("bad_input", "Unknown action.");
-      applyAction(db, action, now(), req.body?.seconds);
-      changed();
+      applyAction(db, req.params.sid, action, now(), req.body?.seconds);
+      changed(req.params.sid);
       return { ok: true };
     });
 
-    fac.post<{ Body: { title?: string; description?: string; theme?: string } }>("/api/facilitator/ideas", async (req) => {
-      const idea = createIdea(db, req.body ?? {});
-      changed();
+    fac.post<P & { Body: { name?: string; description?: string; color?: string } }>("/api/s/:sid/admin/columns", async (req) => {
+      const column = createColumn(db, req.params.sid, req.body ?? {});
+      changed(req.params.sid);
+      return { column };
+    });
+
+    fac.put<PI & { Body: { name?: string; description?: string; color?: string } }>("/api/s/:sid/admin/columns/:id", async (req) => {
+      const column = updateColumn(db, req.params.sid, Number(req.params.id), req.body ?? {});
+      changed(req.params.sid);
+      return { column };
+    });
+
+    fac.delete<PI>("/api/s/:sid/admin/columns/:id", async (req) => {
+      deleteColumn(db, req.params.sid, Number(req.params.id));
+      changed(req.params.sid);
+      return { ok: true };
+    });
+
+    fac.post<PI & { Body: { direction?: string } }>("/api/s/:sid/admin/columns/:id/move", async (req) => {
+      moveColumn(db, req.params.sid, Number(req.params.id), req.body?.direction === "left" ? "left" : "right");
+      changed(req.params.sid);
+      return { ok: true };
+    });
+
+    type IdeaBody = { columnId?: number; title?: string; summary?: string; details?: string; audience?: string; code?: string };
+
+    fac.post<P & { Body: IdeaBody }>("/api/s/:sid/admin/ideas", async (req) => {
+      const idea = createIdea(db, req.params.sid, req.body ?? {});
+      changed(req.params.sid);
       return { idea };
     });
 
-    fac.put<{ Params: { id: string }; Body: { title?: string; description?: string; theme?: string } }>("/api/facilitator/ideas/:id", async (req) => {
-      const idea = updateIdea(db, Number(req.params.id), req.body ?? {});
-      changed();
+    fac.put<PI & { Body: IdeaBody }>("/api/s/:sid/admin/ideas/:id", async (req) => {
+      const idea = updateIdea(db, req.params.sid, Number(req.params.id), req.body ?? {});
+      changed(req.params.sid);
       return { idea };
     });
 
-    fac.delete<{ Params: { id: string } }>("/api/facilitator/ideas/:id", async (req) => {
-      deleteIdea(db, Number(req.params.id));
-      changed();
+    fac.delete<PI>("/api/s/:sid/admin/ideas/:id", async (req) => {
+      deleteIdea(db, req.params.sid, Number(req.params.id));
+      changed(req.params.sid);
       return { ok: true };
     });
 
-    fac.post<{ Body: { from?: number; into?: number } }>("/api/facilitator/ideas/merge", async (req) => {
-      mergeIdeas(db, Number(req.body?.from), Number(req.body?.into));
-      changed();
+    fac.post<P & { Body: { from?: number; into?: number } }>("/api/s/:sid/admin/ideas-merge", async (req) => {
+      mergeIdeas(db, req.params.sid, Number(req.body?.from), Number(req.body?.into));
+      changed(req.params.sid);
       return { ok: true };
     });
 
-    fac.post<{ Body: { format?: string; content?: string; mode?: string } }>("/api/facilitator/import", async (req) => {
+    fac.post<P & { Body: { format?: string; content?: string; mode?: string } }>("/api/s/:sid/admin/import", async (req) => {
       const { format, content, mode } = req.body ?? {};
       if ((format !== "csv" && format !== "json") || typeof content !== "string") throw new VoteError("bad_input", "Choose a CSV or JSON file.");
-      const result = importIdeas(db, parseIdeas(format, content), mode === "replace" ? "replace" : "append");
-      changed();
+      const result = importBoard(db, req.params.sid, parseIdeas(format, content), mode === "replace" ? "replace" : "append");
+      changed(req.params.sid);
       return result;
     });
+
+    fac.get<P>("/api/s/:sid/admin/export", async (req) => exportBoard(db, req.params.sid));
   });
 
   return app;
 }
 
-/** Development convenience only (SEED_EXAMPLE=1). A real session's ideas come from the facilitator. */
-function seedExample(db: DB) {
-  if (process.env.SEED_EXAMPLE !== "1" || listIdeas(db).length) return;
-  insertIdeas(db, JSON.parse(fs.readFileSync("ideas.example.json", "utf8")));
-}
-
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.meta.dirname, "index.ts");
 if (isMain) {
   const db = openDb(process.env.DB_PATH ?? "data/brainstorm.db");
-  seedExample(db);
-  let passcode = process.env.FACILITATOR_PASSCODE;
-  if (passcode === "change-me") passcode = undefined; // never accept the placeholder from .env.example
-  if (!passcode) console.warn("FACILITATOR_PASSCODE is not set: the facilitator view is disabled.");
-  const app = buildApp(db, { passcode, trustProxy: process.env.TRUST_PROXY === "1" });
+  const app = buildApp(db, { trustProxy: process.env.TRUST_PROXY === "1" });
   const dist = path.resolve(import.meta.dirname, "../dist");
   if (fs.existsSync(dist)) {
     await app.register(fastifyStatic, { root: dist });
-    // Single-page app: /facilitator and other client routes serve index.html.
+    // Single-page app: /s/<code>, /f/<code> and other client routes serve index.html.
     app.setNotFoundHandler((req, reply) =>
       req.method === "GET" && !req.url.startsWith("/api") && !req.url.startsWith("/ws")
         ? reply.sendFile("index.html")

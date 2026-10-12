@@ -1,10 +1,17 @@
-[
-  { "title": "Weekly leadership huddle", "description": "A 20-minute standing check-in to surface blockers early and keep priorities aligned.", "theme": "Ways of working" },
-  { "title": "Decision log", "description": "Record major decisions, owners, and rationale in one shared place so context is never lost.", "theme": "Ways of working" },
-  { "title": "Quarterly learning sprint", "description": "Set aside one week each quarter for the team to study a shared topic.", "theme": "People" },
-  { "title": "Mentor pairing", "description": "Pair every senior leader with an emerging leader for monthly conversations.", "theme": "People" },
-  { "title": "Customer advisory panel", "description": "Meet a rotating panel of customers every quarter to test our direction.", "theme": "Outreach" },
-  { "title": "Public progress report", "description": "Publish a short, plain-language update on goals and results twice a year.", "theme": "Outreach" },
-  { "title": "Simplify approvals", "description": "Cut approval steps for spending under a set threshold." },
-  { "title": "Shared dashboard", "description": "One dashboard of the five numbers the whole team agrees matter most.", "theme": "Ways of working" }
-]
+{
+  "columns": [
+    { "name": "Structure", "description": "Decision rights, approvals, and how decisions get recorded", "color": "#3b6fc4" },
+    { "name": "Ways of working", "description": "Meetings, focus time, and simplification", "color": "#e8833a" },
+    { "name": "Culture", "description": "Feedback, recognition, and keeping people informed", "color": "#3fa56b" }
+  ],
+  "ideas": [
+    { "column": "Structure", "audience": "For individuals", "title": "Review your own approvals", "summary": "Flag one approval you think could sit closer to the person doing the work.", "details": "Pick the approval that slows your team most. Propose moving it, try it for a month, and write down what happened." },
+    { "column": "Structure", "audience": "For managers", "title": "Remove one unneeded approval", "summary": "Find one approval step on your team that could be cut or delegated.", "details": "Try the change, note the result, and share it with other managers." },
+    { "column": "Structure", "audience": "For everyone", "title": "Write down decisions clearly", "summary": "Name the decision, who made it, and why, in one shared place.", "details": "Keep a simple log: the decision, the owner, the date, the reasoning, and when it will be reviewed." },
+    { "column": "Ways of working", "audience": "For individuals", "title": "Protect focus time", "summary": "Block time in your calendar and keep it.", "details": "Set visible focus blocks and ask your team to respect them, and respect theirs." },
+    { "column": "Ways of working", "audience": "For managers", "title": "Audit your team's meetings", "summary": "Review each recurring meeting: is it needed, and could it be shorter?", "details": "List every recurring meeting, keep the ones that earn their time, shorten or end the rest." },
+    { "column": "Ways of working", "audience": "For everyone", "title": "Default to asynchronous updates", "summary": "Share status in writing and keep meetings for decisions.", "details": "Agree as a team which updates move to writing, and revisit the agreement each quarter." },
+    { "column": "Culture", "audience": "For managers", "title": "Open a feedback channel", "summary": "A standing agenda item, a shared doc, or an anonymous survey.", "details": "Choose one lightweight way for people to raise concerns, and respond to what comes in." },
+    { "column": "Culture", "audience": "For leaders", "title": "Close the loop on feedback", "summary": "Show what changed because of what people said.", "details": "After each round of feedback, share what you heard, what you will do, and what you won't." }
+  ]
+}

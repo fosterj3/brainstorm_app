@@ -4,14 +4,12 @@ services:
     name: brainstorm-app
     runtime: docker
     plan: starter
-    healthCheckPath: /api/session
+    healthCheckPath: /
     disk:
       name: data
       mountPath: /data
       sizeGB: 1
     envVars:
-      - key: FACILITATOR_PASSCODE
-        sync: false
       - key: DB_PATH
         value: /data/brainstorm.db
       - key: TRUST_PROXY

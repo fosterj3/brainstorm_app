@@ -1,17 +1,22 @@
 # brainstorm_app
 
-Live, silent prioritization exercises for leadership teams. A facilitator loads ideas; participants join by link, enter a name, and star their top N during a timed quiet period; the facilitator locks voting and reveals ranked results.
+A web app for live, silent prioritization exercises. Anyone can open the site, create a board of idea cards in colored columns, send one link to their group, and see what people star. Everyone votes privately and at the same time.
 
-**Status:** Phase 3 of 5 (facilitator controls and timer). Results, presentation mode and CSV export are phase 4; the 50-person load test is phase 5. See [CLAUDE.md](CLAUDE.md) for the rules and plan.
+**Status:** boards, links, voting, sync, facilitator controls and timer are working. Results, presentation mode and CSV export are next (phase 4), then a 50-person load test (phase 5). See [CLAUDE.md](CLAUDE.md) for the rules and plan.
 
 ## How a session runs
 
-1. **Set up** (`/facilitator`, passcode protected): import ideas from CSV or JSON, or add, edit, merge and delete them in the UI. Choose stars per person, whether results will be anonymous or named, whether participants may suggest ideas, and a quiet-voting time (or no timer at all).
-2. **Share the participant link** (shown on the facilitator screen). People enter a name and can read the ideas and suggest their own while you set up.
-3. **Start voting.** The countdown starts on everyone's screen, synced to the server's clock. Participants star ideas up to the cap and press "I'm done" when finished. You see only how many have submitted, never what anyone picked.
-4. **Control the clock:** pause, resume, add a minute or five, or lock voting when you are ready (or let it lock automatically when time runs out). You can reopen voting after a lock.
+1. **Create a board** on the home page: give it a title, start blank or from an example. You get two links:
+   - a **participant link** (`/s/<code>`) to share, and
+   - a **private facilitator link** (`/f/<code>#<secret>`) to bookmark. There are no accounts, so this link is your access. Anyone who has it can run the session.
+2. **Build the board** (facilitator, "Build the board" tab): set the title, subtitle and page color; add columns with their own colors and descriptions; add cards with a short code, an audience tag, a title, a summary and longer details. Or import a CSV/JSON file, and download the board as JSON to reuse later.
+3. **Run the session** ("Run the session" tab): share the participant link, pick a quiet voting time (or none), choose stars per person, anonymous or named results, and whether people can add their own ideas. Start voting.
+4. **Participants** open the link, enter a name, read the ideas, and star up to their limit. They can add their own ideas before voting starts. They press "I'm done" when finished. You see only how many have submitted, never what anyone picked.
+5. **Control the clock:** pause, resume, add time, lock voting (or let it lock automatically), and reopen if needed.
 
-Ideas CSV: a header row with `title` and optionally `description` and `theme`. JSON: a list of objects with the same fields. See `ideas.example.json`.
+CSV import: a header row with `title`, and optionally `column`, `summary`, `details`, `audience`, `code`. Columns are created as needed. JSON import also accepts a `columns` list with colors. See `ideas.example.json`.
+
+Boards that nobody has used for 90 days are deleted automatically.
 
 ## Run locally
 
@@ -19,16 +24,13 @@ Requires Node 22+.
 
 ```bash
 npm install
-cp .env.example .env     # then set FACILITATOR_PASSCODE
 npm run build
 npm start
 ```
 
-Open http://localhost:3000 (participants) and http://localhost:3000/facilitator (facilitator). Without `FACILITATOR_PASSCODE` the facilitator view is disabled.
+Open http://localhost:3000, click "Create board", and use the participant link in a second browser (or a private window) to try it as a participant.
 
-The database starts empty. For development, set `SEED_EXAMPLE=1` in `.env` to load the made-up sample ideas from `ideas.example.json` into an empty database.
-
-For development with hot reload, run `npm run dev:server` and `npm run dev:client` in two terminals and open the Vite URL (http://localhost:5173). To try multi-user sync, open the page in two different browsers (or a normal and a private window) and join with different names.
+For development with hot reload, run `npm run dev:server` and `npm run dev:client` in two terminals and open the Vite URL (http://localhost:5173).
 
 Other commands: `npm test`, `npm run typecheck`.
 
@@ -36,22 +38,20 @@ Windows note: if the repo lives in a folder whose path contains `&` (for example
 
 ## Configuration
 
-Copy `.env.example` to `.env` (gitignored). Real ideas go in `data/` (gitignored); never commit them, passcodes or exported results. Stars per person, anonymity, idea limits and the timer are facilitator settings, not code constants.
+Copy `.env.example` to `.env` (gitignored). Real data lives in `data/` (gitignored); never commit facilitator links, keys or exported results. Stars per person, anonymity, idea limits, the timer and colors are facilitator settings, not code constants.
 
 | Variable | Purpose |
 | --- | --- |
-| `FACILITATOR_PASSCODE` | Required for the facilitator view. Use something unguessable. |
 | `PORT` | Port to listen on (default 3000). |
 | `DB_PATH` | SQLite file (default `data/brainstorm.db`). Must be on persistent storage when hosted. |
-| `TRUST_PROXY` | Set to `1` when behind a hosting proxy so the passcode attempt limit sees real client IPs. |
-| `SEED_EXAMPLE` | Development only: `1` loads the sample ideas into an empty database. |
+| `TRUST_PROXY` | Set to `1` when behind a hosting proxy so the board-creation rate limit sees real client IPs. |
 
 ## Hosting for a live session
 
 The app is one Node process holding WebSockets and timers in memory, with a SQLite file. That means:
 
 - **Run exactly one instance.** Do not scale out or use scale-to-zero.
-- **The database needs a persistent disk**, so votes survive restarts and deploys.
+- **The database needs a persistent disk**, so boards and votes survive restarts and deploys.
 - **It needs a public HTTPS URL.** WebSockets (`wss://`) must be allowed, which every mainstream host does.
 
 Config files are included for two hosts (the Docker build has not yet been run on a real host):
@@ -61,12 +61,11 @@ Config files are included for two hosts (the Docker build has not yet been run o
 ```bash
 fly launch --no-deploy --copy-config     # pick a unique app name
 fly volumes create brainstorm_data --size 1
-fly secrets set FACILITATOR_PASSCODE=<choose-a-passcode>
 fly deploy
 ```
 
-Participants then use `https://<app-name>.fly.dev/` and you use `https://<app-name>.fly.dev/facilitator`.
+The site is then at `https://<app-name>.fly.dev/`. Anyone can create boards there, so consider the abuse limits (board creation is rate limited per client, and idle boards are deleted) before sharing the address widely.
 
-**Render** (`render.yaml`): create a Blueprint from this repo, set `FACILITATOR_PASSCODE` when prompted. A persistent disk requires a paid plan.
+**Render** (`render.yaml`): create a Blueprint from this repo. A persistent disk requires a paid plan.
 
-Before a live session: open the facilitator link on the day, load your ideas, and do a quick join from a phone. Delete `data/` (or reset the volume) between sessions so one group's participants and votes never carry into the next.
+Before a live session, do a quick join from a phone. Back up the `data/` volume if the results matter to you.

@@ -1,11 +1,27 @@
+export interface Column {
+  id: number;
+  name: string;
+  description: string;
+  color: string;
+  kind: "normal" | "group";
+}
 export interface Idea {
   id: number;
+  columnId: number;
+  code: string;
+  audience: string;
   title: string;
-  description: string;
-  theme: string;
+  summary: string;
+  details: string;
 }
 export interface FacilitatorIdea extends Idea {
   author: string | null;
+}
+export interface BoardMeta {
+  id: string;
+  title: string;
+  subtitle: string;
+  bg: string;
 }
 
 export type Phase = "setup" | "voting" | "locked";
@@ -25,9 +41,11 @@ export interface Settings {
   locked: boolean;
   timer: Timer;
 }
-export interface Session {
+export interface Board {
   serverNow: number;
+  board: BoardMeta;
   settings: Settings;
+  columns: Column[];
   ideas: Idea[];
   me: { name: string; votes: number[]; ideasAdded: number; submitted: boolean } | null;
 }
@@ -38,7 +56,9 @@ export interface Counts {
 }
 export interface FacilitatorState {
   serverNow: number;
+  board: BoardMeta;
   settings: Settings;
+  columns: Column[];
   ideas: FacilitatorIdea[];
   counts: Counts;
 }
@@ -55,27 +75,48 @@ export class ApiError extends Error {
   }
 }
 
-const TOKEN_KEY = "brainstorm.token";
-const FAC_KEY = "brainstorm.facilitator";
-export const getToken = () => localStorage.getItem(TOKEN_KEY) ?? "";
-export const setToken = (t: string) => localStorage.setItem(TOKEN_KEY, t);
-export const getFacToken = () => localStorage.getItem(FAC_KEY) ?? "";
-export const setFacToken = (t: string) => (t ? localStorage.setItem(FAC_KEY, t) : localStorage.removeItem(FAC_KEY));
+// ---- what this browser remembers -----------------------------------------------------------
 
-async function call<T>(method: string, url: string, body?: unknown, facilitator = false): Promise<T> {
-  const headers: Record<string, string> = facilitator ? { "x-facilitator-token": getFacToken() } : { "x-participant-token": getToken() };
-  if (body !== undefined) headers["content-type"] = "application/json";
-  const res = await fetch(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+const tokenKey = (sid: string) => `brainstorm.token.${sid}`;
+const adminKey = (sid: string) => `brainstorm.admin.${sid}`;
+const BOARDS_KEY = "brainstorm.boards";
+
+export const getToken = (sid: string) => localStorage.getItem(tokenKey(sid)) ?? "";
+export const getAdminKey = (sid: string) => localStorage.getItem(adminKey(sid)) ?? "";
+export const setAdminKey = (sid: string, key: string) => localStorage.setItem(adminKey(sid), key);
+export const forgetAdminKey = (sid: string) => localStorage.removeItem(adminKey(sid));
+
+/** Boards this browser can facilitate (keys live in localStorage on this device only). */
+export function myBoards(): { id: string; title: string }[] {
+  try {
+    const list = JSON.parse(localStorage.getItem(BOARDS_KEY) ?? "[]") as { id: string; title: string }[];
+    return list.filter((b) => getAdminKey(b.id));
+  } catch {
+    return [];
+  }
+}
+export function rememberBoard(id: string, title: string) {
+  const rest = myBoards().filter((b) => b.id !== id);
+  localStorage.setItem(BOARDS_KEY, JSON.stringify([{ id, title }, ...rest].slice(0, 30)));
+}
+
+async function call<T>(method: string, url: string, headers: Record<string, string>, body?: unknown): Promise<T> {
+  const h = { ...headers };
+  if (body !== undefined) h["content-type"] = "application/json";
+  const res = await fetch(url, { method, headers: h, body: body === undefined ? undefined : JSON.stringify(body) });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new ApiError(data.error ?? "error", data.message ?? "Something went wrong.");
   return data as T;
 }
+
+// ---- live updates --------------------------------------------------------------------------
 
 /**
  * Keeps a WebSocket open, reconnecting with backoff. `onOpen` fires on every (re)connect, which is
  * where callers refetch their state so nothing missed while offline is lost.
  */
 export function connectLive(
+  sid: string,
   who: "participant" | "facilitator",
   handlers: { onPush: (m: Push) => void; onOpen: () => void; onStatus: (online: boolean) => void },
 ) {
@@ -86,8 +127,8 @@ export function connectLive(
 
   const open = () => {
     const proto = location.protocol === "https:" ? "wss" : "ws";
-    const query = who === "facilitator" ? `facilitator=${encodeURIComponent(getFacToken())}` : `token=${encodeURIComponent(getToken())}`;
-    ws = new WebSocket(`${proto}://${location.host}/ws?${query}`);
+    const cred = who === "facilitator" ? `admin=${encodeURIComponent(getAdminKey(sid))}` : `token=${encodeURIComponent(getToken(sid))}`;
+    ws = new WebSocket(`${proto}://${location.host}/ws?session=${encodeURIComponent(sid)}&${cred}`);
     ws.onopen = () => {
       delay = 500;
       handlers.onStatus(true);
@@ -120,29 +161,51 @@ export function connectLive(
   };
 }
 
-// participant
-export const fetchSession = () => call<Session>("GET", "/api/session");
-export async function join(name: string) {
-  const r = await call<{ token: string; name: string }>("POST", "/api/join", { name, token: getToken() });
-  setToken(r.token);
+// ---- public --------------------------------------------------------------------------------
+
+export const createBoard = (input: { title: string; subtitle: string; template: "blank" | "example" }) =>
+  call<{ id: string; adminKey: string }>("POST", "/api/sessions", {}, input);
+export const boardExists = (sid: string) => call<{ title: string }>("GET", `/api/s/${encodeURIComponent(sid)}/exists`, {});
+
+// ---- participant ---------------------------------------------------------------------------
+
+const pHeaders = (sid: string) => ({ "x-participant-token": getToken(sid) });
+export const fetchBoard = (sid: string) => call<Board>("GET", `/api/s/${sid}/board`, pHeaders(sid));
+export async function join(sid: string, name: string) {
+  const r = await call<{ token: string; name: string }>("POST", `/api/s/${sid}/join`, {}, { name, token: getToken(sid) });
+  localStorage.setItem(tokenKey(sid), r.token);
   return r;
 }
-export const setVote = (ideaId: number, starred: boolean) => call<{ votes: number[] }>("PUT", `/api/votes/${ideaId}`, { starred });
-export const setSubmitted = (submitted: boolean) => call<{ submitted: boolean }>("PUT", "/api/submitted", { submitted });
-export const addIdea = (idea: { title: string; description: string; theme: string }) =>
-  call<{ idea: Idea; ideasAdded: number }>("POST", "/api/ideas", idea);
+export const setVote = (sid: string, ideaId: number, starred: boolean) =>
+  call<{ votes: number[] }>("PUT", `/api/s/${sid}/votes/${ideaId}`, pHeaders(sid), { starred });
+export const setSubmitted = (sid: string, submitted: boolean) =>
+  call<{ submitted: boolean }>("PUT", `/api/s/${sid}/submitted`, pHeaders(sid), { submitted });
+export const suggestIdea = (sid: string, idea: { title: string; summary: string }) =>
+  call<{ idea: Idea }>("POST", `/api/s/${sid}/ideas`, pHeaders(sid), idea);
 
-// facilitator
-export async function facilitatorLogin(passcode: string) {
-  const r = await call<{ token: string }>("POST", "/api/facilitator/login", { passcode });
-  setFacToken(r.token);
-}
-export const facState = () => call<FacilitatorState>("GET", "/api/facilitator/state", undefined, true);
-export const facSettings = (patch: Record<string, unknown>) => call<{ ok: true }>("PUT", "/api/facilitator/settings", patch, true);
-export const facAction = (action: string, seconds?: number) => call<{ ok: true }>("POST", "/api/facilitator/action", { action, seconds }, true);
-export const facAddIdea = (idea: Partial<Idea>) => call<{ idea: Idea }>("POST", "/api/facilitator/ideas", idea, true);
-export const facEditIdea = (id: number, idea: Partial<Idea>) => call<{ idea: Idea }>("PUT", `/api/facilitator/ideas/${id}`, idea, true);
-export const facDeleteIdea = (id: number) => call<{ ok: true }>("DELETE", `/api/facilitator/ideas/${id}`, undefined, true);
-export const facMerge = (from: number, into: number) => call<{ ok: true }>("POST", "/api/facilitator/ideas/merge", { from, into }, true);
-export const facImport = (format: "csv" | "json", content: string, mode: "append" | "replace") =>
-  call<{ added: number; skipped: number }>("POST", "/api/facilitator/import", { format, content, mode }, true);
+// ---- facilitator ---------------------------------------------------------------------------
+
+const aHeaders = (sid: string) => ({ "x-admin-key": getAdminKey(sid) });
+const A = (sid: string, path: string) => `/api/s/${sid}/admin/${path}`;
+
+export type IdeaInput = Partial<Pick<Idea, "columnId" | "title" | "summary" | "details" | "audience" | "code">>;
+export type ColumnInput = Partial<Pick<Column, "name" | "description" | "color">>;
+
+export const adminState = (sid: string) => call<FacilitatorState>("GET", A(sid, "state"), aHeaders(sid));
+export const adminBoard = (sid: string, patch: Partial<Pick<BoardMeta, "title" | "subtitle" | "bg">>) =>
+  call<{ ok: true }>("PUT", A(sid, "board"), aHeaders(sid), patch);
+export const adminSettings = (sid: string, patch: Record<string, unknown>) => call<{ ok: true }>("PUT", A(sid, "settings"), aHeaders(sid), patch);
+export const adminAction = (sid: string, action: string, seconds?: number) =>
+  call<{ ok: true }>("POST", A(sid, "action"), aHeaders(sid), { action, seconds });
+export const adminAddColumn = (sid: string, c: ColumnInput) => call<{ column: Column }>("POST", A(sid, "columns"), aHeaders(sid), c);
+export const adminEditColumn = (sid: string, id: number, c: ColumnInput) => call<{ column: Column }>("PUT", A(sid, `columns/${id}`), aHeaders(sid), c);
+export const adminDeleteColumn = (sid: string, id: number) => call<{ ok: true }>("DELETE", A(sid, `columns/${id}`), aHeaders(sid));
+export const adminMoveColumn = (sid: string, id: number, direction: "left" | "right") =>
+  call<{ ok: true }>("POST", A(sid, `columns/${id}/move`), aHeaders(sid), { direction });
+export const adminAddIdea = (sid: string, i: IdeaInput) => call<{ idea: Idea }>("POST", A(sid, "ideas"), aHeaders(sid), i);
+export const adminEditIdea = (sid: string, id: number, i: IdeaInput) => call<{ idea: Idea }>("PUT", A(sid, `ideas/${id}`), aHeaders(sid), i);
+export const adminDeleteIdea = (sid: string, id: number) => call<{ ok: true }>("DELETE", A(sid, `ideas/${id}`), aHeaders(sid));
+export const adminMerge = (sid: string, from: number, into: number) => call<{ ok: true }>("POST", A(sid, "ideas-merge"), aHeaders(sid), { from, into });
+export const adminImport = (sid: string, format: "csv" | "json", content: string, mode: "append" | "replace") =>
+  call<{ added: number; skipped: number; columnsAdded: number }>("POST", A(sid, "import"), aHeaders(sid), { format, content, mode });
+export const adminExport = (sid: string) => call<unknown>("GET", A(sid, "export"), aHeaders(sid));
