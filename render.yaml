@@ -1,0 +1,18 @@
+# Render blueprint. A persistent disk requires a paid plan.
+services:
+  - type: web
+    name: brainstorm-app
+    runtime: docker
+    plan: starter
+    healthCheckPath: /api/session
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: FACILITATOR_PASSCODE
+        sync: false
+      - key: DB_PATH
+        value: /data/brainstorm.db
+      - key: TRUST_PROXY
+        value: "1"

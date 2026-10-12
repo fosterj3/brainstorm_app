@@ -1,0 +1,10 @@
+[
+  { "title": "Weekly leadership huddle", "description": "A 20-minute standing check-in to surface blockers early and keep priorities aligned.", "theme": "Ways of working" },
+  { "title": "Decision log", "description": "Record major decisions, owners, and rationale in one shared place so context is never lost.", "theme": "Ways of working" },
+  { "title": "Quarterly learning sprint", "description": "Set aside one week each quarter for the team to study a shared topic.", "theme": "People" },
+  { "title": "Mentor pairing", "description": "Pair every senior leader with an emerging leader for monthly conversations.", "theme": "People" },
+  { "title": "Customer advisory panel", "description": "Meet a rotating panel of customers every quarter to test our direction.", "theme": "Outreach" },
+  { "title": "Public progress report", "description": "Publish a short, plain-language update on goals and results twice a year.", "theme": "Outreach" },
+  { "title": "Simplify approvals", "description": "Cut approval steps for spending under a set threshold." },
+  { "title": "Shared dashboard", "description": "One dashboard of the five numbers the whole team agrees matter most.", "theme": "Ways of working" }
+]
