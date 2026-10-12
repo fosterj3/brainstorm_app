@@ -24,7 +24,7 @@ export interface BoardMeta {
   bg: string;
 }
 
-export type Phase = "setup" | "voting" | "locked";
+export type Phase = "setup" | "voting" | "locked" | "revealed";
 export interface Timer {
   durationSec: number | null;
   state: "stopped" | "running" | "paused" | "ended";
@@ -39,6 +39,7 @@ export interface Settings {
   autoLock: boolean;
   phase: Phase;
   locked: boolean;
+  revealed: boolean;
   timer: Timer;
 }
 export interface Board {
@@ -61,6 +62,25 @@ export interface FacilitatorState {
   columns: Column[];
   ideas: FacilitatorIdea[];
   counts: Counts;
+}
+
+export interface ResultRow {
+  id: number;
+  column: string;
+  columnId: number;
+  code: string;
+  audience: string;
+  title: string;
+  summary: string;
+  stars: number;
+  rank: number;
+  tied: boolean;
+  voters?: string[];
+}
+export interface Results {
+  named: boolean;
+  totals: { joined: number; submitted: number; voted: number; stars: number };
+  rows: ResultRow[];
 }
 
 export type Push =
@@ -209,3 +229,19 @@ export const adminMerge = (sid: string, from: number, into: number) => call<{ ok
 export const adminImport = (sid: string, format: "csv" | "json", content: string, mode: "append" | "replace") =>
   call<{ added: number; skipped: number; columnsAdded: number }>("POST", A(sid, "import"), aHeaders(sid), { format, content, mode });
 export const adminExport = (sid: string) => call<unknown>("GET", A(sid, "export"), aHeaders(sid));
+export const adminResults = (sid: string) => call<Results>("GET", A(sid, "results"), aHeaders(sid));
+
+/** Download the results as a CSV file (the server builds it, so formulas in idea titles are neutralised). */
+export async function downloadResultsCsv(sid: string, title: string) {
+  const res = await fetch(A(sid, "results.csv"), { headers: aHeaders(sid) });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new ApiError(data.error ?? "error", data.message ?? "Could not export the results.");
+  }
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "session"}-results.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}

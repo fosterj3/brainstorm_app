@@ -18,7 +18,7 @@ Scale targets: 5 participants first, must handle 20 and 50 concurrent in one ses
 - Settings: stars per person, anonymous vs. named results, whether participants may add ideas (and how many each), auto-lock when time runs out.
 - Timer: preset, custom, or none. Start, pause, resume, extend, lock, reopen.
 - Sees only headcounts (joined, online, submitted), never what anyone picked.
-- Then lock voting and reveal results (phase 4): ranked by stars, ties shown clearly, grouped-by-column view, full-screen presentation mode, CSV export.
+- Then lock voting and reveal results: ranked by stars, ties shown clearly (shared rank, 1-2-2-4), grouped-by-column view, full-screen presentation mode, CSV export. Results are gated on the server: nothing is tallied until the reveal, and participants never receive them.
 
 ### Participant (public link)
 - Joins by entering a name. Sees colored columns of cards, collapsible, readable on laptop and phone. Cards show code, audience tag, title, summary and a "Details" disclosure.
@@ -41,7 +41,8 @@ Scale targets: 5 participants first, must handle 20 and 50 concurrent in one ses
 - Every query is scoped by session id. A facilitator key or participant token for one session must never read or change another. Tests cover this.
 - The vote cap, phase (setup/voting/locked) and timer are enforced on the server. Never trust the client.
 - Participant-facing messages never include other people's votes or totals, or who suggested an idea. Vote data is sent only to the facilitator after reveal, and per-person picks only when results are set to named.
-- The facilitator's live view gets headcounts only, not picks.
+- The facilitator's live view gets headcounts only, not picks. Tallies exist only in the `revealed` phase, and only for the facilitator key.
+- CSV export neutralises spreadsheet formulas (cells starting with = + - @), because idea titles come from participants.
 - Facilitator secrets are compared by hash in constant time, never logged, never put in query strings (except the websocket handshake) and never committed.
 - Creating boards is rate limited per client.
 
@@ -61,7 +62,7 @@ Built in phases, pausing for the user's review after each:
 2. Multi-user real-time sync (done)
 3. Facilitator controls and timer (done)
 3b. Multi-board web app: home page, create-your-own board, colors, secret links (done)
-4. Results, presentation mode, and CSV export
+4. Results, presentation mode, and CSV export (done)
 5. Load test simulating 50 participants
 
 At the end, document how to run locally and what is needed to host a live session.

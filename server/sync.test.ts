@@ -314,3 +314,90 @@ describe("facilitator controls end to end", () => {
     expect(out.ideas.map((i: any) => i.title)).toEqual(["Alpha, beta", "Gamma"]);
   });
 });
+
+describe("results", () => {
+  async function votedBoard() {
+    const b = await makeBoard();
+    const [alex, sam] = [await join(b.sid, "Alex"), await join(b.sid, "Sam")];
+    await act(b, "start");
+    await api("PUT", `/api/s/${b.sid}/votes/${b.first}`, as(alex), { starred: true });
+    await api("PUT", `/api/s/${b.sid}/votes/${b.first}`, as(sam), { starred: true });
+    await api("PUT", `/api/s/${b.sid}/votes/${b.second}`, as(sam), { starred: true });
+    return { ...b, alex, sam };
+  }
+  const results = (b: { sid: string; key: string }) => api("GET", `/api/s/${b.sid}/admin/results`, asAdmin(b.key));
+
+  it("are refused until revealed, and need the facilitator key", async () => {
+    const b = await votedBoard();
+    expect((await api("GET", `/api/s/${b.sid}/admin/results`)).status).toBe(401);
+    expect((await api("GET", `/api/s/${b.sid}/admin/results`, as(b.alex))).status).toBe(401);
+    expect((await results(b)).status).toBe(409); // still voting
+    await act(b, "lock");
+    expect((await results(b)).status).toBe(409); // locked but not revealed
+    expect((await act(b, "reveal")).status).toBe(200);
+    const r = await results(b);
+    expect(r.status).toBe(200);
+    expect(r.body.rows[0]).toMatchObject({ id: b.first, stars: 2, rank: 1, tied: false });
+    expect(r.body.rows[1]).toMatchObject({ id: b.second, stars: 1, rank: 2 });
+  });
+
+  it("never reach participants, before or after the reveal", async () => {
+    const b = await votedBoard();
+    await act(b, "lock");
+    await act(b, "reveal");
+    const board = (await api("GET", `/api/s/${b.sid}/board`, as(b.alex))).body;
+    expect(board.settings.phase).toBe("revealed");
+    const text = JSON.stringify(board);
+    expect(text).not.toContain('"stars"');
+    expect(text).not.toContain('"rank"');
+    expect(text).not.toContain("Sam");
+    expect((await api("GET", `/api/s/${b.sid}/admin/results`, as(b.alex))).status).toBe(401);
+  });
+
+  it("tell participants that results are showing, and block further votes", async () => {
+    const b = await votedBoard();
+    const ca = await connect(`session=${b.sid}&token=${b.alex}`);
+    await settle();
+    ca.messages.length = 0;
+    await act(b, "lock");
+    await act(b, "reveal");
+    await settle();
+    expect(ca.messages.filter((m) => m.type === "refresh").length).toBeGreaterThanOrEqual(2);
+    expect((await api("PUT", `/api/s/${b.sid}/votes/${b.second}`, as(b.alex), { starred: true })).status).toBe(403);
+  });
+
+  it("export as CSV with the right headers, anonymous by default", async () => {
+    const b = await votedBoard();
+    await act(b, "lock");
+    await act(b, "reveal");
+    const res = await fetch(`http://${base}/api/s/${b.sid}/admin/results.csv`, { headers: asAdmin(b.key) });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/csv");
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    const csv = await res.text();
+    expect(csv).toContain("Rank,Tied,Code,Idea,Column,Audience,Stars");
+    expect(csv).toContain(",One,Alpha,,2");
+    expect(csv).not.toMatch(/Alex|Sam|Starred by/);
+    expect((await fetch(`http://${base}/api/s/${b.sid}/admin/results.csv`)).status).toBe(401);
+  });
+
+  it("show who starred what only when the facilitator chose named results", async () => {
+    const b = await votedBoard();
+    await api("PUT", `/api/s/${b.sid}/admin/settings`, asAdmin(b.key), { namedResults: true });
+    await act(b, "lock");
+    await act(b, "reveal");
+    const r = (await results(b)).body;
+    expect(r.named).toBe(true);
+    expect(r.rows[0].voters).toEqual(["Alex", "Sam"]);
+    const csv = await (await fetch(`http://${base}/api/s/${b.sid}/admin/results.csv`, { headers: asAdmin(b.key) })).text();
+    expect(csv).toContain("Alex; Sam");
+  });
+
+  it("can be hidden again, which closes the results", async () => {
+    const b = await votedBoard();
+    await act(b, "lock");
+    await act(b, "reveal");
+    expect((await act(b, "hide")).status).toBe(200);
+    expect((await results(b)).status).toBe(409);
+  });
+});

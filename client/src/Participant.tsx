@@ -153,6 +153,7 @@ function Voting(props: { sid: string; data: BoardData; setData: SetData; refresh
         </p>
         {settings.phase === "setup" && <p class="notice">Waiting for the facilitator to start voting. You can read the ideas now.</p>}
         {settings.phase === "locked" && <p class="notice">Voting is locked. Your stars are saved.</p>}
+        {settings.phase === "revealed" && <p class="notice">Voting is closed and the facilitator is sharing the results. Your stars are saved.</p>}
         {voting && timer.state === "paused" && <p class="notice">The facilitator paused the timer.</p>}
         {voting && timer.state === "ended" && <p class="notice">Time is up. The facilitator will lock voting shortly.</p>}
         <p role="alert" class="error" hidden={!error}>{error}</p>

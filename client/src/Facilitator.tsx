@@ -4,10 +4,11 @@ import type { FacilitatorState } from "./api";
 import { Board } from "./Board";
 import { BoardEditor, type Run } from "./BoardEditor";
 import { Countdown } from "./Countdown";
+import { Presentation, ResultsPanel } from "./Results";
 
 const PRESETS = [1, 2, 3, 5, 10, 15, 20, 30];
-const PHASE_LABEL = { setup: "Setting up", voting: "Voting open", locked: "Voting locked" } as const;
-type Tab = "run" | "build" | "preview";
+const PHASE_LABEL = { setup: "Setting up", voting: "Voting open", locked: "Voting locked", revealed: "Results showing" } as const;
+type Tab = "run" | "build" | "preview" | "results";
 
 /** The facilitator's secret arrives in the link's #fragment (never sent to the server); keep it on this device. */
 function adoptKeyFromLink(sid: string) {
@@ -39,6 +40,7 @@ function Dashboard({ sid, onLostAccess }: { sid: string; onLostAccess: () => voi
   const [error, setError] = useState("");
   const [online, setOnline] = useState(true);
   const [tab, setTab] = useState<Tab>("run");
+  const [presenting, setPresenting] = useState(false);
 
   const refresh = () =>
     api
@@ -83,7 +85,7 @@ function Dashboard({ sid, onLostAccess }: { sid: string; onLostAccess: () => voi
   const { settings, counts } = state;
   const { phase, timer } = settings;
 
-  const tabs: [Tab, string][] = [["run", "Run the session"], ["build", "Build the board"], ["preview", "Preview"]];
+  const tabs: [Tab, string][] = [["run", "Run the session"], ["build", "Build the board"], ["preview", "Preview"], ["results", "Results"]];
 
   return (
     <>
@@ -119,14 +121,20 @@ function Dashboard({ sid, onLostAccess }: { sid: string; onLostAccess: () => voi
           {tab === "run" && (
             <>
               <SharePanel sid={sid} counts={counts} />
-              <Controls sid={sid} state={state} run={run} />
+              <Controls sid={sid} state={state} run={run} onRevealed={() => setTab("results")} onPresent={() => setPresenting(true)} />
               <SettingsPanel sid={sid} state={state} run={run} />
             </>
           )}
           {tab === "build" && <BoardEditor sid={sid} state={state} run={run} />}
           {tab === "preview" && <Preview state={state} />}
+          {tab === "results" && (
+            <ResultsPanel sid={sid} title={state.board.title} columns={state.columns} revealed={settings.phase === "revealed"} onPresent={() => setPresenting(true)} run={run} />
+          )}
         </div>
       </main>
+      {presenting && settings.phase === "revealed" && (
+        <Presentation sid={sid} title={state.board.title} subtitle={state.board.subtitle} columns={state.columns} onClose={() => setPresenting(false)} />
+      )}
     </>
   );
 }
@@ -195,7 +203,7 @@ function fmtDuration(sec: number) {
   return sec % 60 === 0 ? `${sec / 60} min` : `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
 }
 
-function Controls({ sid, state, run }: { sid: string; state: FacilitatorState; run: Run }) {
+function Controls({ sid, state, run, onRevealed, onPresent }: { sid: string; state: FacilitatorState; run: Run; onRevealed: () => void; onPresent: () => void }) {
   const { settings } = state;
   const { phase, timer } = settings;
   const noIdeas = state.ideas.length === 0;
@@ -224,9 +232,19 @@ function Controls({ sid, state, run }: { sid: string; state: FacilitatorState; r
         </div>
       )}
       {phase === "locked" && (
+        <>
+          <div class="row wrap">
+            <button class="primary" onClick={() => run(async () => { await api.adminAction(sid, "reveal"); onRevealed(); })}>Reveal results</button>
+            <button class="secondary" onClick={() => act("reopen")}>Reopen voting</button>
+            <button class="secondary" onClick={() => act("extend", 120)}>Reopen for 2 more min</button>
+          </div>
+          <p class="hint">Voting is locked. Results stay hidden from everyone, including you, until you reveal them.</p>
+        </>
+      )}
+      {phase === "revealed" && (
         <div class="row wrap">
-          <button class="secondary" onClick={() => act("reopen")}>Reopen voting</button>
-          <button class="secondary" onClick={() => act("extend", 120)}>Reopen for 2 more min</button>
+          <button class="primary" onClick={onPresent}>Present full screen</button>
+          <button class="secondary" onClick={() => act("hide")}>Hide results</button>
         </div>
       )}
       {phase === "voting" && timer.durationSec === null && timer.state === "stopped" && <p class="hint">No timer is running. Lock voting when everyone is done.</p>}
@@ -286,8 +304,8 @@ function SettingsPanel({ sid, state, run }: { sid: string; state: FacilitatorSta
         </div>
         <fieldset class="field">
           <legend>Results show</legend>
-          <label class="inline"><input type="radio" name="named" checked={!s.namedResults} onChange={() => set({ namedResults: false })} /> Anonymous totals</label>
-          <label class="inline"><input type="radio" name="named" checked={s.namedResults} onChange={() => set({ namedResults: true })} /> Who starred what</label>
+          <label class="inline"><input type="radio" name="named" disabled={s.phase === "revealed"} checked={!s.namedResults} onChange={() => set({ namedResults: false })} /> Anonymous totals</label>
+          <label class="inline"><input type="radio" name="named" disabled={s.phase === "revealed"} checked={s.namedResults} onChange={() => set({ namedResults: true })} /> Who starred what</label>
         </fieldset>
         <div class="field">
           <label class="inline">

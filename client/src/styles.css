@@ -158,3 +158,35 @@ label.inline { display: flex; gap: 0.5rem; align-items: center; font-weight: 400
 .actions button { padding: 0.35rem 0.7rem; }
 .merge { flex-basis: 100%; }
 .idea-form { flex-basis: 100%; border: 1px solid var(--border); border-radius: 10px; padding: 0.8rem; background: #fafbfc; }
+
+/* ---- results and presentation ---- */
+.spread { justify-content: space-between; }
+.segmented { display: inline-flex; }
+.segmented .secondary { border-radius: 0; margin-left: -1px; }
+.segmented .secondary:first-child { border-radius: 8px 0 0 8px; margin-left: 0; }
+.segmented .secondary:last-child { border-radius: 0 8px 8px 0; }
+.segmented .secondary[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.result-list { list-style: none; margin: 0.75rem 0 0; padding: 0; display: grid; gap: 0.6rem; }
+.result-row { display: flex; align-items: center; gap: 0.9rem; padding: 0.7rem 0.9rem; border-radius: 10px; background: color-mix(in srgb, var(--c) 10%, #fff); border: 1px solid color-mix(in srgb, var(--c) 28%, #fff); }
+.rank { flex: none; width: 2.4rem; height: 2.4rem; border-radius: 50%; display: grid; place-items: center; font-weight: 800; background: var(--text); color: #fff; }
+.result-body { flex: 1; min-width: 0; }
+.result-title { overflow-wrap: anywhere; }
+.result-sub { color: var(--muted); font-size: 0.85rem; }
+.bar-track { height: 0.6rem; background: color-mix(in srgb, var(--c) 18%, #fff); border-radius: 999px; margin-top: 0.4rem; overflow: hidden; }
+.bar-fill { height: 100%; background: var(--c); border-radius: 999px; min-width: 0; }
+.stars-count { flex: none; font-size: 1.4rem; font-variant-numeric: tabular-nums; color: var(--star); white-space: nowrap; }
+.tie-badge { margin-left: 0.5rem; padding: 0.05rem 0.5rem; border-radius: 999px; background: var(--star-bg); color: #7c3a05; font-size: 0.78rem; font-weight: 700; }
+.voters { margin-top: 0.35rem; font-size: 0.85rem; color: #3a4049; }
+.result-columns { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); margin-top: 0.75rem; align-items: start; }
+.result-column h3 { margin: 0; display: flex; align-items: center; gap: 0.5rem; }
+.presentation { position: fixed; inset: 0; z-index: 50; overflow: auto; background: var(--surface); padding: 1.5rem clamp(1rem, 4vw, 4rem) 3rem; }
+.presentation-bar { display: flex; justify-content: space-between; gap: 1rem; align-items: flex-start; flex-wrap: wrap; }
+.presentation h1 { font-size: clamp(1.8rem, 4vw, 3rem); margin: 0; }
+.presentation .lead { font-size: 1.2rem; }
+.presentation .result-row { padding: 1rem 1.3rem; gap: 1.3rem; }
+.presentation .rank { width: 3.4rem; height: 3.4rem; font-size: 1.6rem; }
+.presentation .result-title { font-size: clamp(1.2rem, 2.4vw, 1.9rem); }
+.presentation .result-sub, .presentation .voters { font-size: 1.05rem; }
+.presentation .bar-track { height: 0.9rem; }
+.presentation .stars-count { font-size: 2.4rem; }
+.presentation .hint { font-size: 1rem; }

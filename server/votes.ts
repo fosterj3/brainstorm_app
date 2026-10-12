@@ -58,7 +58,7 @@ export function setVote(db: DB, sid: string, token: string, ideaId: number, star
     if (!db.prepare("SELECT 1 FROM ideas WHERE id = ? AND session_id = ?").get(ideaId, sid)) throw new VoteError("unknown_idea", "That idea no longer exists.");
     const { votesPerPerson, phase } = getSettings(db, sid);
     if (phase === "setup") throw new VoteError("not_started", "Voting has not started yet.");
-    if (phase === "locked") throw new VoteError("locked", "Voting is locked.");
+    if (phase !== "voting") throw new VoteError("locked", "Voting is locked.");
 
     const has = !!db.prepare("SELECT 1 FROM votes WHERE token = ? AND idea_id = ?").get(token, ideaId);
     if (starred && !has) {
@@ -79,7 +79,7 @@ export function setSubmitted(db: DB, sid: string, token: string, submitted: bool
     if (!getParticipant(db, sid, token)) throw new VoteError("unknown_participant", "Please rejoin the session.");
     const { phase } = getSettings(db, sid);
     if (phase === "setup") throw new VoteError("not_started", "Voting has not started yet.");
-    if (phase === "locked") throw new VoteError("locked", "Voting is locked.");
+    if (phase !== "voting") throw new VoteError("locked", "Voting is locked.");
     if (submitted && getVotes(db, sid, token).length === 0) throw new VoteError("nothing_to_submit", "Star at least one idea before submitting.");
     db.prepare("UPDATE participants SET submitted = ? WHERE token = ?").run(submitted ? 1 : 0, token);
     return submitted;

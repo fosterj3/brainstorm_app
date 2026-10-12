@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { openDb, type DB } from "./db";
 import { createThrottle } from "./auth";
+import { getResults, resultsToCsv } from "./results";
 import { HTTP_STATUS, VoteError } from "./errors";
 import { Hub } from "./hub";
 import {
@@ -22,7 +23,7 @@ export interface AppOptions {
   createLimit?: number;
 }
 
-const ACTIONS: Action[] = ["start", "pause", "resume", "extend", "lock", "reopen"];
+const ACTIONS: Action[] = ["start", "pause", "resume", "extend", "lock", "reopen", "reveal", "hide"];
 const IDLE_MS = 90 * 24 * 60 * 60 * 1000;
 
 export function buildApp(db: DB, opts: AppOptions = {}) {
@@ -261,6 +262,14 @@ export function buildApp(db: DB, opts: AppOptions = {}) {
     });
 
     fac.get<P>("/api/s/:sid/admin/export", async (req) => exportBoard(db, req.params.sid));
+
+    // Results exist only after the facilitator reveals them (getResults enforces this).
+    fac.get<P>("/api/s/:sid/admin/results", async (req) => getResults(db, req.params.sid));
+
+    fac.get<P>("/api/s/:sid/admin/results.csv", async (req, reply) => {
+      const csv = resultsToCsv(getResults(db, req.params.sid));
+      return reply.header("content-type", "text/csv; charset=utf-8").header("cache-control", "no-store").send(csv);
+    });
   });
 
   return app;

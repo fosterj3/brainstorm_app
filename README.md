@@ -2,7 +2,7 @@
 
 A web app for live, silent prioritization exercises. Anyone can open the site, create a board of idea cards in colored columns, send one link to their group, and see what people star. Everyone votes privately and at the same time.
 
-**Status:** boards, links, voting, sync, facilitator controls and timer are working. Results, presentation mode and CSV export are next (phase 4), then a 50-person load test (phase 5). See [CLAUDE.md](CLAUDE.md) for the rules and plan.
+**Status:** boards, links, voting, sync, facilitator controls, timer, results, presentation mode and CSV export are working. A 50-person load test is next (phase 5). See [CLAUDE.md](CLAUDE.md) for the rules and plan.
 
 ## How a session runs
 
@@ -13,6 +13,7 @@ A web app for live, silent prioritization exercises. Anyone can open the site, c
 3. **Run the session** ("Run the session" tab): share the participant link, pick a quiet voting time (or none), choose stars per person, anonymous or named results, and whether people can add their own ideas. Start voting.
 4. **Participants** open the link, enter a name, read the ideas, and star up to their limit. They can add their own ideas before voting starts. They press "I'm done" when finished. You see only how many have submitted, never what anyone picked.
 5. **Control the clock:** pause, resume, add time, lock voting (or let it lock automatically), and reopen if needed.
+6. **Reveal the results.** After locking, click **Reveal results**. Until then nobody can see the tally, including you. The Results tab ranks ideas by stars, labels ties (tied ideas share a rank: 1, 2, 2, 4), and can group the same results by column. Click **Present full screen** to project it, and **Download CSV** to keep a copy. Results are anonymous unless you chose "Who starred what" before revealing. Participants never see the tally; they only see that results are being shared. **Hide results** takes them off screen again.
 
 CSV import: a header row with `title`, and optionally `column`, `summary`, `details`, `audience`, `code`. Columns are created as needed. JSON import also accepts a `columns` list with colors. See `ideas.example.json`.
 

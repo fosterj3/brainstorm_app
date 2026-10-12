@@ -1,8 +1,8 @@
 import { DEFAULT_IDEAS_PER_PERSON, DEFAULT_VOTES_PER_PERSON, type DB } from "./db";
 import { VoteError } from "./errors";
 
-/** setup: collecting ideas. voting: stars open. locked: stars closed. */
-export type Phase = "setup" | "voting" | "locked";
+/** setup: collecting ideas. voting: stars open. locked: stars closed. revealed: facilitator is showing results. */
+export type Phase = "setup" | "voting" | "locked" | "revealed";
 export type TimerState = "stopped" | "running" | "paused" | "ended";
 
 export interface Timer {
@@ -27,6 +27,7 @@ export interface Settings {
   autoLock: boolean;
   phase: Phase;
   locked: boolean;
+  revealed: boolean;
   timer: Timer;
 }
 
@@ -50,7 +51,7 @@ export function getSettings(db: DB, sid: string): Settings {
   const num = (key: string) => (raw.get(key) ? Number(raw.get(key)) : NaN);
   const posInt = (key: string, fallback: number) => (Number.isInteger(num(key)) && num(key) > 0 ? num(key) : fallback);
 
-  const phase: Phase = raw.get("phase") === "voting" || raw.get("phase") === "locked" ? (raw.get("phase") as Phase) : "setup";
+  const phase: Phase = (["voting", "locked", "revealed"] as const).find((p) => p === raw.get("phase")) ?? "setup";
   const state = (["running", "paused", "ended"] as const).find((s) => s === raw.get("timer_state")) ?? "stopped";
   const timer: Timer = {
     durationSec: num("timer_duration_sec") > 0 ? num("timer_duration_sec") : null,
@@ -66,6 +67,7 @@ export function getSettings(db: DB, sid: string): Settings {
     autoLock: raw.get("auto_lock") === "1",
     phase,
     locked: phase === "locked",
+    revealed: phase === "revealed",
     timer,
   };
 }
@@ -102,7 +104,7 @@ const checkSeconds = (seconds: unknown): number => {
   return Math.round(n);
 };
 
-export type Action = "start" | "pause" | "resume" | "extend" | "lock" | "reopen";
+export type Action = "start" | "pause" | "resume" | "extend" | "lock" | "reopen" | "reveal" | "hide";
 
 /** Facilitator controls. Every transition is validated against the current phase and timer. */
 export function applyAction(db: DB, sid: string, action: Action, now: number, seconds?: number) {
@@ -132,6 +134,7 @@ export function applyAction(db: DB, sid: string, action: Action, now: number, se
       case "extend": {
         const sec = checkSeconds(seconds);
         need(s.phase !== "setup", "Start voting first. Before that, change the timer in settings.");
+        need(s.phase !== "revealed", "Hide the results before changing the time.");
         if (timer.state === "running") writeTimer(db, sid, { state: "running", endsAt: timer.endsAt! + sec * 1000 });
         else if (timer.state === "paused") writeTimer(db, sid, { state: "paused", remainingMs: timer.remainingMs! + sec * 1000 });
         else writeTimer(db, sid, { state: "running", endsAt: now + sec * 1000 }); // ended, stopped, or reopening after a lock
@@ -148,6 +151,16 @@ export function applyAction(db: DB, sid: string, action: Action, now: number, se
         need(s.phase === "locked", "Voting is not locked.");
         setSetting(db, sid, "phase", "voting");
         writeTimer(db, sid, { state: "stopped" });
+        return;
+      }
+      case "reveal": {
+        need(s.phase === "locked", "Lock voting before revealing the results.");
+        setSetting(db, sid, "phase", "revealed");
+        return;
+      }
+      case "hide": {
+        need(s.phase === "revealed", "The results are not showing.");
+        setSetting(db, sid, "phase", "locked");
         return;
       }
     }
@@ -181,6 +194,7 @@ export function updateSettings(db: DB, sid: string, patch: SettingsPatch) {
       need(s.phase === "setup", "The timer length can only change before voting starts. Use extend once voting is open.");
       setSetting(db, sid, "timer_duration_sec", patch.timerSeconds === null ? null : checkSeconds(patch.timerSeconds));
     }
+    if (patch.namedResults !== undefined) need(s.phase !== "revealed", "Hide the results before changing who they show.");
     if (patch.ideasPerPerson !== undefined) setSetting(db, sid, "ideas_per_person", intIn(patch.ideasPerPerson, 1, 20, "Ideas per person"));
     if (patch.ideasOpen !== undefined) setSetting(db, sid, "ideas_open", patch.ideasOpen === true);
     if (patch.namedResults !== undefined) setSetting(db, sid, "named_results", patch.namedResults === true);
