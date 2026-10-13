@@ -9,7 +9,8 @@
   --star: #b45309;
   --star-bg: #fff4e0;
   --danger: #b00020;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  /* Noto Sans is bundled with the app (see main.tsx); the rest is only a fallback while it loads. */
+  font-family: "Noto Sans Variable", "Noto Sans", system-ui, sans-serif;
   color: var(--text);
 }
 * { box-sizing: border-box; }
@@ -32,7 +33,7 @@ h1 { font-size: 1.5rem; margin: 0.5rem 0; }
 .notice { background: var(--accent-tint); border: 1px solid color-mix(in srgb, var(--accent) 25%, #fff); padding: 0.6rem 0.8rem; border-radius: 8px; }
 .empty { color: var(--muted); padding: 0.75rem 0; }
 .plain { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.4rem; }
-code { background: #eceef1; padding: 0.05rem 0.3rem; border-radius: 4px; }
+code { font-family: inherit; background: #eceef1; padding: 0.05rem 0.3rem; border-radius: 4px; }
 a { color: var(--accent); }
 
 /* ---- forms and buttons ---- */
@@ -91,7 +92,6 @@ label.inline { display: flex; gap: 0.5rem; align-items: center; font-weight: 400
   width: 100%; display: flex; align-items: center; gap: 0.5rem; text-align: left; padding: 0.2rem 0; background: none; border: 0;
   cursor: pointer; color: var(--text); font-weight: 700;
 }
-.column-name { font-family: Georgia, "Times New Roman", serif; }
 .dot { flex: none; width: 0.8rem; height: 0.8rem; border-radius: 50%; background: var(--c); }
 .meta { margin-left: auto; font-weight: 400; color: var(--muted); font-size: 0.88rem; }
 .chev { width: 1rem; color: var(--muted); }

@@ -1,3 +1,4 @@
+import "@fontsource-variable/noto-sans";
 import { render } from "preact";
 import { Facilitator } from "./Facilitator";
 import { Home } from "./Home";
