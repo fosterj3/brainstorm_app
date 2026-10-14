@@ -64,6 +64,13 @@ function ViewToggle({ view, onChange }: { view: View; onChange: (v: View) => voi
 
 function Summary({ results }: { results: Results }) {
   const t = results.totals;
+  if (results.restored) {
+    return (
+      <p class="hint">
+        Restored from a CSV file · {t.stars} {t.stars === 1 ? "star" : "stars"} in total · {results.named ? "Names are shown." : "Anonymous: no names are shown."}
+      </p>
+    );
+  }
   return (
     <p class="hint">
       {t.voted} of {t.joined} {t.joined === 1 ? "person" : "people"} starred ideas · {t.stars} {t.stars === 1 ? "star" : "stars"} in total
@@ -108,6 +115,7 @@ export function ResultsPanel(props: { sid: string; title: string; columns: Colum
         </div>
       </div>
       <Summary results={results} />
+      <p class="hint">Download the CSV and keep it. Hosting can erase boards, and you can rebuild these results later from the home page.</p>
       <ResultsView results={results} columns={columns} view={view} />
     </section>
   );

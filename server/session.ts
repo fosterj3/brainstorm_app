@@ -33,7 +33,7 @@ export interface Settings {
 
 export type SettingKey =
   | "votes_per_person" | "ideas_open" | "ideas_per_person" | "named_results" | "auto_lock"
-  | "phase" | "timer_duration_sec" | "timer_state" | "timer_ends_at" | "timer_remaining_ms";
+  | "restored" | "phase" | "timer_duration_sec" | "timer_state" | "timer_ends_at" | "timer_remaining_ms";
 
 export const MAX_TIMER_SEC = 4 * 60 * 60;
 export const MIN_TIMER_SEC = 10;

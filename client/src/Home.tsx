@@ -24,6 +24,7 @@ export function Home() {
         <CreateForm />
         <div>
           <JoinForm />
+          <RestoreForm />
           {boards.length > 0 && <MyBoards initial={boards} />}
           <JoinedSessions />
           <p class="hint">Your lists are saved in this browser only. Keep your private facilitator links to get back in from another device.</p>
@@ -226,6 +227,53 @@ function JoinedSessions() {
           </li>
         ))}
       </ul>
+    </section>
+  );
+}
+
+/** Rebuild a board from a results CSV that was downloaded earlier. Hosting can erase boards, so this is the way back. */
+function RestoreForm() {
+  const [title, setTitle] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const onFile = async (e: Event) => {
+    const input = e.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    if (!title.trim()) {
+      setError("Give the restored board a title first.");
+      input.value = "";
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const r = await api.restoreResults(title, await file.text());
+      api.setAdminKey(r.id, r.adminKey);
+      api.rememberBoard(r.id, title.trim());
+      sessionStorage.setItem("brainstorm.openResults", r.id);
+      location.assign(`/f/${r.id}`);
+    } catch (err) {
+      setError((err as Error).message);
+      setBusy(false);
+      input.value = "";
+    }
+  };
+
+  return (
+    <section class="panel" aria-labelledby="h-restore">
+      <h2 id="h-restore">Restore results from a CSV</h2>
+      <p class="hint">Lost a board? Upload the results CSV you downloaded and the ranking comes back as a new board.</p>
+      <div class="field">
+        <label for="r-title">Title for the restored board</label>
+        <input id="r-title" value={title} maxLength={100} onInput={(e) => setTitle((e.target as HTMLInputElement).value)} />
+      </div>
+      <div class="field">
+        <label for="r-file">Results CSV</label>
+        <input id="r-file" type="file" accept=".csv,text/csv" disabled={busy} onChange={onFile} aria-describedby={error ? "r-error" : undefined} />
+      </div>
+      {error && <p id="r-error" role="alert" class="error">{error}</p>}
     </section>
   );
 }

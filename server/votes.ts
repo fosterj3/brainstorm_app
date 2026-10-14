@@ -93,6 +93,15 @@ export function getCounts(db: DB, sid: string) {
   return { joined, submitted };
 }
 
+/** Names of participants who have not pressed Submit. Names only, never what anyone picked. */
+export function getPending(db: DB, sid: string): string[] {
+  return (db.prepare("SELECT name FROM participants WHERE session_id = ? AND submitted = 0 ORDER BY name COLLATE NOCASE").all(sid) as { name: string }[]).map((r) => r.name);
+}
+
+export function getPendingTokens(db: DB, sid: string): string[] {
+  return (db.prepare("SELECT token FROM participants WHERE session_id = ? AND submitted = 0").all(sid) as { token: string }[]).map((r) => r.token);
+}
+
 export function countIdeasBy(db: DB, sid: string, token: string): number {
   return (db.prepare("SELECT COUNT(*) AS n FROM ideas WHERE session_id = ? AND author_token = ?").get(sid, token) as { n: number }).n;
 }

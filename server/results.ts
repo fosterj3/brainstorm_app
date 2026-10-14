@@ -20,6 +20,8 @@ export interface ResultRow {
 
 export interface Results {
   named: boolean;
+  /** True for a board rebuilt from an uploaded results CSV: participation counts are not known. */
+  restored: boolean;
   totals: { joined: number; submitted: number; voted: number; stars: number };
   rows: ResultRow[];
 }
@@ -35,12 +37,13 @@ export function getResults(db: DB, sid: string): Results {
   const rows = db
     .prepare(
       `SELECT i.id, i.column_id AS columnId, c.name AS column, i.code, i.audience, i.title, i.summary,
-              (SELECT COUNT(*) FROM votes v WHERE v.idea_id = i.id) AS stars
+              (SELECT COUNT(*) FROM votes v WHERE v.idea_id = i.id) + i.restored_stars AS stars,
+              i.restored_voters AS restoredVoters
        FROM ideas i JOIN columns c ON c.id = i.column_id
        WHERE i.session_id = ?
        ORDER BY stars DESC, (c.kind = 'group'), c.position, i.id`,
     )
-    .all(sid) as Omit<ResultRow, "rank" | "tied" | "voters">[];
+    .all(sid) as (Omit<ResultRow, "rank" | "tied" | "voters"> & { restoredVoters: string | null })[];
 
   const counts = new Map<number, number>();
   for (const r of rows) counts.set(r.stars, (counts.get(r.stars) ?? 0) + 1);
@@ -54,6 +57,11 @@ export function getResults(db: DB, sid: string): Results {
       )
       .all(sid) as { id: number; name: string }[];
     for (const n of named) voters.set(n.id, [...(voters.get(n.id) ?? []), n.name]);
+    for (const r of rows) {
+      if (!r.restoredVoters) continue;
+      const merged = new Set([...(voters.get(r.id) ?? []), ...(JSON.parse(r.restoredVoters) as string[])]);
+      voters.set(r.id, [...merged].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" })));
+    }
   }
 
   let rank = 0;
@@ -61,7 +69,8 @@ export function getResults(db: DB, sid: string): Results {
   const ranked: ResultRow[] = rows.map((r, i) => {
     if (r.stars !== prevStars) rank = i + 1;
     prevStars = r.stars;
-    const row: ResultRow = { ...r, rank, tied: (counts.get(r.stars) ?? 0) > 1 };
+    const { restoredVoters: _ignored, ...base } = r;
+    const row: ResultRow = { ...base, rank, tied: (counts.get(r.stars) ?? 0) > 1 };
     if (namedResults) row.voters = voters.get(r.id) ?? [];
     return row;
   });
@@ -69,6 +78,7 @@ export function getResults(db: DB, sid: string): Results {
   const one = (sql: string) => (db.prepare(sql).get(sid) as { n: number }).n;
   return {
     named: namedResults,
+    restored: (db.prepare("SELECT value FROM settings WHERE session_id = ? AND key = 'restored'").get(sid) as { value: string } | undefined)?.value === "1",
     totals: {
       joined: one("SELECT COUNT(*) AS n FROM participants WHERE session_id = ?"),
       submitted: one("SELECT COUNT(*) AS n FROM participants WHERE session_id = ? AND submitted = 1"),

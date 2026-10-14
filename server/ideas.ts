@@ -210,6 +210,12 @@ export function mergeIdeas(db: DB, sid: string, fromId: number, intoId: number) 
       if (!db.prepare("SELECT 1 FROM ideas WHERE id = ? AND session_id = ?").get(id, sid)) throw new VoteError("unknown_idea", "That idea no longer exists.");
     }
     db.prepare("INSERT OR IGNORE INTO votes (token, idea_id) SELECT token, ? FROM votes WHERE idea_id = ?").run(intoId, fromId);
+    const get = (id: number) => db.prepare("SELECT restored_stars AS s, restored_voters AS v FROM ideas WHERE id = ?").get(id) as { s: number; v: string | null };
+    const [a, b] = [get(fromId), get(intoId)];
+    if (a.s || b.s || a.v || b.v) {
+      const names = [...new Set([...(JSON.parse(a.v ?? "[]") as string[]), ...(JSON.parse(b.v ?? "[]") as string[])])];
+      db.prepare("UPDATE ideas SET restored_stars = ?, restored_voters = ? WHERE id = ?").run(a.s + b.s, names.length ? JSON.stringify(names) : null, intoId);
+    }
     db.prepare("DELETE FROM ideas WHERE id = ?").run(fromId);
   })();
 }

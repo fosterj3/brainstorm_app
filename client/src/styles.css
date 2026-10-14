@@ -201,3 +201,20 @@ label.inline { display: flex; gap: 0.5rem; align-items: center; font-weight: 400
 .notice.warn { background: var(--star-bg); border-color: #e8c98a; color: #5c3203; }
 .danger-zone { border-color: #e3b4bb; }
 .add-tile.closed { cursor: default; border-style: solid; border-color: var(--border); background: #f1f2f4; color: var(--muted); }
+
+/* ---- submitting ---- */
+.page.has-bar { padding-bottom: 7rem; }
+.submit-bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; background: var(--surface); border-top: 2px solid var(--border); box-shadow: 0 -4px 14px rgba(0, 0, 0, 0.08); }
+.submit-bar-inner { max-width: 1500px; margin: 0 auto; padding: 0.7rem 1rem; display: flex; gap: 0.75rem; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.submit-bar .primary { min-width: 11rem; font-size: 1.05rem; padding: 0.75rem 1.2rem; }
+.submit-bar.ready { border-top-color: var(--accent); }
+.submit-bar.done { background: #eef7f1; border-top-color: #3fa56b; }
+.submit-bar.urgent { border-top-color: var(--danger); background: #fdf1f1; }
+.done-text { color: #0b6b2e; font-weight: 600; }
+.notice.urgent { background: #fdf1f1; border-color: #e3b4bb; color: #7a0016; font-weight: 600; }
+.pending { margin: 0.9rem 0 0; display: grid; gap: 0.5rem; justify-items: start; }
+.pending p { margin: 0; }
+@media (prefers-reduced-motion: no-preference) {
+  .submit-bar.urgent .primary { animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 25%, transparent); } }
+}

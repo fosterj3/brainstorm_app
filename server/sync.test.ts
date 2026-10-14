@@ -434,3 +434,105 @@ describe("my boards: summary and delete over the API", () => {
     expect((await api("GET", `/api/s/${other.sid}/admin/state`, asAdmin(other.key))).status).toBe(200);
   });
 });
+
+describe("restoring results over the API", () => {
+  const csv = "Rank,Tied,Code,Idea,Column,Audience,Stars\r\n1,,A1,First,Alpha,For all,3\r\n2,,A2,Second,Alpha,,1\r\n";
+
+  it("creates a new board with the results showing, readable only with its own key", async () => {
+    const res = await api("POST", "/api/sessions/restore", {}, { title: "Restored", csv });
+    expect(res.status).toBe(200);
+    const { id, adminKey } = res.body;
+    const r = await api("GET", `/api/s/${id}/admin/results`, asAdmin(adminKey));
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({ restored: true, named: false });
+    expect(r.body.rows.map((x: any) => [x.title, x.stars, x.rank])).toEqual([["First", 3, 1], ["Second", 1, 2]]);
+    expect((await api("GET", `/api/s/${id}/admin/results`)).status).toBe(401);
+    // Participants see only that results are showing, never the tally.
+    const board = (await api("GET", `/api/s/${id}/board`)).body;
+    expect(board.settings.phase).toBe("revealed");
+    expect(JSON.stringify(board)).not.toContain('"stars"');
+  });
+
+  it("the facilitator can download the restored results again", async () => {
+    const { id, adminKey } = (await api("POST", "/api/sessions/restore", {}, { title: "Restored", csv })).body;
+    const out = await (await fetch(`http://${base}/api/s/${id}/admin/results.csv`, { headers: asAdmin(adminKey) })).text();
+    expect(out).toContain(",First,Alpha,For all,3");
+  });
+
+  it("rejects a file that is not a results file, and creates no board", async () => {
+    const bad = await api("POST", "/api/sessions/restore", {}, { title: "Nope", csv: "name,age\nAnn,3\n" });
+    expect(bad.status).toBe(400);
+    expect(bad.body.message).toContain("Idea");
+    expect((await api("POST", "/api/sessions/restore", {}, { title: "Nope" })).status).toBe(400);
+    expect((db.prepare("SELECT COUNT(*) AS n FROM sessions").get() as { n: number }).n).toBe(0);
+  });
+
+  it("counts toward the board-creation limit", async () => {
+    await app.close();
+    await boot({ createLimit: 2 });
+    const statuses: number[] = [];
+    for (let i = 0; i < 3; i++) statuses.push((await api("POST", "/api/sessions/restore", {}, { title: `R${i}`, csv })).status);
+    expect(statuses).toEqual([200, 200, 429]);
+  });
+});
+
+describe("making sure people submit", () => {
+  async function voting() {
+    const b = await makeBoard();
+    const [ann, ben, cy] = [await join(b.sid, "Ann"), await join(b.sid, "Ben"), await join(b.sid, "Cy")];
+    await act(b, "start");
+    return { ...b, ann, ben, cy };
+  }
+  const state = (b: { sid: string; key: string }) => api("GET", `/api/s/${b.sid}/admin/state`, asAdmin(b.key));
+
+  it("shows the facilitator who has not submitted, by name only", async () => {
+    const b = await voting();
+    await api("PUT", `/api/s/${b.sid}/votes/${b.first}`, as(b.ann), { starred: true });
+    await api("PUT", `/api/s/${b.sid}/submitted`, as(b.ann), { submitted: true });
+    const s = (await state(b)).body;
+    expect(s.counts.pending).toEqual(["Ben", "Cy"]);
+    expect(s.counts).toMatchObject({ joined: 3, submitted: 1 });
+    expect(JSON.stringify(s)).not.toContain('"votes"');
+  });
+
+  it("pushes the pending list live to the facilitator", async () => {
+    const b = await voting();
+    const cf = await connect(`session=${b.sid}&admin=${b.key}`);
+    await api("PUT", `/api/s/${b.sid}/votes/${b.first}`, as(b.ben), { starred: true });
+    await api("PUT", `/api/s/${b.sid}/submitted`, as(b.ben), { submitted: true });
+    await settle();
+    const last = cf.messages.filter((m) => m.type === "counts").at(-1);
+    expect(last.pending).toEqual(["Ann", "Cy"]);
+  });
+
+  it("a reminder reaches only the people who have not submitted", async () => {
+    const b = await voting();
+    await api("PUT", `/api/s/${b.sid}/votes/${b.first}`, as(b.ann), { starred: true });
+    await api("PUT", `/api/s/${b.sid}/submitted`, as(b.ann), { submitted: true });
+    const [cAnn, cBen] = [await connect(`session=${b.sid}&token=${b.ann}`), await connect(`session=${b.sid}&token=${b.ben}`)];
+    await settle();
+    cAnn.messages.length = cBen.messages.length = 0;
+    const res = await api("POST", `/api/s/${b.sid}/admin/remind`, asAdmin(b.key));
+    expect(res.body).toEqual({ reminded: 2 });
+    await settle();
+    expect(cBen.messages.some((m) => m.type === "nudge")).toBe(true);
+    expect(cAnn.messages.some((m) => m.type === "nudge")).toBe(false);
+  });
+
+  it("limits reminders to once every few seconds, and needs the facilitator key", async () => {
+    const b = await voting();
+    expect((await api("POST", `/api/s/${b.sid}/admin/remind`, as(b.ann))).status).toBe(401);
+    expect((await api("POST", `/api/s/${b.sid}/admin/remind`)).status).toBe(401);
+    expect((await api("POST", `/api/s/${b.sid}/admin/remind`, asAdmin(b.key))).status).toBe(200);
+    expect((await api("POST", `/api/s/${b.sid}/admin/remind`, asAdmin(b.key))).status).toBe(429);
+  });
+
+  it("only works while voting is open", async () => {
+    const b = await makeBoard();
+    await join(b.sid, "Ann");
+    expect((await api("POST", `/api/s/${b.sid}/admin/remind`, asAdmin(b.key))).status).toBe(409); // not started
+    await act(b, "start");
+    await act(b, "lock");
+    expect((await api("POST", `/api/s/${b.sid}/admin/remind`, asAdmin(b.key))).status).toBe(409); // locked
+  });
+});

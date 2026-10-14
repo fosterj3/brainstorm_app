@@ -2,7 +2,7 @@ import { useEffect, useState } from "preact/hooks";
 import * as api from "./api";
 import type { Board as BoardData } from "./api";
 import { Board } from "./Board";
-import { Countdown } from "./Countdown";
+import { Countdown, remainingMs } from "./Countdown";
 
 /** Make sure a subtitle ends with punctuation before more text follows it. */
 const withStop = (s: string) => (/[.!?:]$/.test(s.trim()) ? s.trim() : `${s.trim()}.`);
@@ -12,6 +12,7 @@ export function Participant({ sid }: { sid: string }) {
   const [offset, setOffset] = useState(0);
   const [error, setError] = useState("");
   const [online, setOnline] = useState(true);
+  const [nudged, setNudged] = useState(false);
   const joined = !!data?.me;
 
   const refresh = () =>
@@ -34,6 +35,7 @@ export function Participant({ sid }: { sid: string }) {
       onStatus: setOnline,
       onPush: (m) => {
         if (m.type === "refresh") refresh();
+        else if (m.type === "nudge") setNudged(true);
         else if (m.type === "deleted") {
           setError("The facilitator has ended this session.");
           setData(null);
@@ -65,7 +67,7 @@ export function Participant({ sid }: { sid: string }) {
   }
   if (!data) return <main class="page"><p>Loading…</p></main>;
   if (!data.me) return <JoinForm sid={sid} board={data} onJoined={refresh} />;
-  return <Voting sid={sid} data={data} setData={setData} refresh={refresh} online={online} offset={offset} />;
+  return <Voting sid={sid} data={data} setData={setData} refresh={refresh} online={online} offset={offset} nudged={nudged} clearNudge={() => setNudged(false)} />;
 }
 
 function JoinForm({ sid, board, onJoined }: { sid: string; board: BoardData; onJoined: () => void }) {
@@ -106,8 +108,8 @@ function JoinForm({ sid, board, onJoined }: { sid: string; board: BoardData; onJ
 
 type SetData = (f: (d: BoardData | null) => BoardData | null) => void;
 
-function Voting(props: { sid: string; data: BoardData; setData: SetData; refresh: () => void; online: boolean; offset: number }) {
-  const { sid, data, setData, refresh, online, offset } = props;
+function Voting(props: { sid: string; data: BoardData; setData: SetData; refresh: () => void; online: boolean; offset: number; nudged: boolean; clearNudge: () => void }) {
+  const { sid, data, setData, refresh, online, offset, nudged, clearNudge } = props;
   const { settings, ideas, columns, me } = data;
   const votes = new Set(me!.votes);
   const [error, setError] = useState("");
@@ -117,6 +119,35 @@ function Voting(props: { sid: string; data: BoardData; setData: SetData; refresh
   const { timer } = settings;
   const canSuggest = settings.ideasOpen && settings.phase === "setup" && settings.ideasPerPerson - me!.ideasAdded > 0;
   const ideasClosed = settings.ideasOpen && settings.phase !== "setup";
+
+  // Re-render every second while a timer runs, so the "almost out of time" prompt can appear on its own.
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (timer.state !== "running") return;
+    const id = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, [timer.state, timer.endsAt]);
+  const left = remainingMs(timer, offset);
+  const almostOut = voting && timer.state === "running" && left !== null && left <= 60_000;
+  const timeUp = voting && timer.state === "ended";
+  const unsubmitted = voting && !me!.submitted;
+  const needsSubmit = unsubmitted && used > 0;
+  const urgent = unsubmitted && (nudged || almostOut || timeUp);
+
+  useEffect(() => {
+    if (me!.submitted || !voting) clearNudge();
+  }, [me!.submitted, voting]);
+
+  // Leaving with stars that are not submitted yet? Ask first. (Stars are saved either way; this is a prompt to finish.)
+  useEffect(() => {
+    if (!needsSubmit) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [needsSubmit]);
 
   const setVotes = (next: number[]) => setData((d) => (d && d.me ? { ...d, me: { ...d.me, votes: next } } : d));
 
@@ -158,10 +189,10 @@ function Voting(props: { sid: string; data: BoardData; setData: SetData; refresh
         </div>
         {!online && <p class="offline" role="status">Reconnecting… your stars are saved.</p>}
       </header>
-      <main class="page wide">
+      <main class={`page wide${voting ? " has-bar" : ""}`}>
         <h1>{data.board.title}</h1>
         <p class="lead">
-          {withStop(data.board.subtitle || "Choose the ideas you feel most strongly about")} Star up to {settings.votesPerPerson}. Your picks are private.
+          {withStop(data.board.subtitle || "Choose the ideas you feel most strongly about")} Star up to {settings.votesPerPerson}, then press Submit. Your picks are private.
         </p>
         {settings.phase === "setup" && (
           <p class="notice">
@@ -172,24 +203,25 @@ function Voting(props: { sid: string; data: BoardData; setData: SetData; refresh
         {settings.phase !== "setup" && settings.ideasOpen && (
           <p class="notice" role="note">Voting has started, so new ideas can't be added any more.</p>
         )}
-        {settings.phase === "locked" && <p class="notice">Voting is locked. Your stars are saved.</p>}
-        {settings.phase === "revealed" && <p class="notice">Voting is closed and the facilitator is sharing the results. Your stars are saved.</p>}
+        {settings.phase === "locked" && (
+          <p class="notice">
+            Voting is locked. {used > 0 && !me!.submitted ? `You didn't press Submit, but your ${used} ${used === 1 ? "star was" : "stars were"} saved and counted.` : "Your stars are saved."}
+          </p>
+        )}
+        {settings.phase === "revealed" && (
+          <p class="notice">
+            Voting is closed and the facilitator is sharing the results. {used > 0 && !me!.submitted ? `You didn't press Submit, but your ${used} ${used === 1 ? "star was" : "stars were"} saved and counted.` : "Your stars are saved."}
+          </p>
+        )}
+        {urgent && (
+          <p class="notice urgent" role="alert">
+            {nudged ? "The facilitator is waiting for you to submit. " : timeUp ? "Time is up. " : "Less than a minute left. "}
+            {used === 0 ? `Star up to ${settings.votesPerPerson} ideas, then press Submit.` : "Press Submit now so your response is in."}
+          </p>
+        )}
         {voting && timer.state === "paused" && <p class="notice">The facilitator paused the timer.</p>}
         {voting && timer.state === "ended" && <p class="notice">Time is up. The facilitator will lock voting shortly.</p>}
         <p role="alert" class="error" hidden={!error}>{error}</p>
-
-        {voting && (
-          <div class="submit-row">
-            {me!.submitted ? (
-              <>
-                <span class="done">✓ Submitted. You can still change your stars until voting locks.</span>
-                <button class="secondary" onClick={() => submit(false)}>Undo</button>
-              </>
-            ) : (
-              <button class="primary" disabled={used === 0} onClick={() => submit(true)}>I'm done: submit my stars</button>
-            )}
-          </div>
-        )}
 
         {ideas.length === 0 && !canSuggest && <p class="empty">No ideas yet. They will appear here as soon as they are added.</p>}
 
@@ -205,6 +237,28 @@ function Voting(props: { sid: string; data: BoardData; setData: SetData; refresh
           }
         />
       </main>
+
+      {voting && (
+        <div class={`submit-bar${me!.submitted ? " done" : full ? " ready" : ""}${urgent ? " urgent" : ""}`} role="region" aria-label="Submit your stars">
+          <div class="submit-bar-inner">
+            {me!.submitted ? (
+              <>
+                <span class="done-text">✓ Submitted. You can still change your stars until voting locks.</span>
+                <button class="secondary" onClick={() => submit(false)}>Undo</button>
+              </>
+            ) : (
+              <>
+                <span>
+                  {used === 0 ? `Star up to ${settings.votesPerPerson} ideas, then submit.`
+                    : full ? "You've used all your stars. Submit when you're happy with them."
+                    : `${used} of ${settings.votesPerPerson} stars used. Submit when you're done.`}
+                </span>
+                <button class="primary" disabled={used === 0} onClick={() => submit(true)}>Submit my stars</button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </>
   );
 }

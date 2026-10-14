@@ -39,7 +39,8 @@ function Dashboard({ sid, onLostAccess }: { sid: string; onLostAccess: () => voi
   const [offset, setOffset] = useState(0);
   const [error, setError] = useState("");
   const [online, setOnline] = useState(true);
-  const [tab, setTab] = useState<Tab>("run");
+  const [tab, setTab] = useState<Tab>(() => (sessionStorage.getItem("brainstorm.openResults") === sid ? "results" : "run"));
+  useEffect(() => { sessionStorage.removeItem("brainstorm.openResults"); }, []);
   const [presenting, setPresenting] = useState(false);
 
   const refresh = () =>
@@ -59,7 +60,7 @@ function Dashboard({ sid, onLostAccess }: { sid: string; onLostAccess: () => voi
       onStatus: setOnline,
       onPush: (m) => {
         if (m.type === "refresh") refresh();
-        if (m.type === "counts") setState((s) => (s ? { ...s, counts: { joined: m.joined, connected: m.connected, submitted: m.submitted } } : s));
+        if (m.type === "counts") setState((s) => (s ? { ...s, counts: { joined: m.joined, connected: m.connected, submitted: m.submitted, pending: m.pending } } : s));
       },
     });
   }, []);
@@ -94,7 +95,7 @@ function Dashboard({ sid, onLostAccess }: { sid: string; onLostAccess: () => voi
           <strong class="bar-title">{state.board.title}</strong>
           <span class="phase" data-phase={phase}>{PHASE_LABEL[phase]}</span>
           {timer.state !== "stopped" && <Countdown timer={timer} offset={offset} />}
-          <span class="hint">{counts.submitted} of {counts.joined} submitted</span>
+          {counts.joined > 0 && <span class="hint">{counts.submitted} of {counts.joined} submitted</span>}
           <a href="/" class="hint">My boards</a>
         </div>
         {!online && <p class="offline" role="status">Reconnecting…</p>}
@@ -222,6 +223,17 @@ function Controls({ sid, state, run, onRevealed, onPresent }: { sid: string; sta
   const startWarning = `Start voting now?
 
 Once voting starts, participants can no longer add their own ideas${suggested ? ` (${suggested} suggested so far)` : ""}. You can still edit the board yourself.`;
+  const pending = state.counts.pending;
+  const lockWarning = pending.length
+    ? `${pending.length} ${pending.length === 1 ? "person hasn't" : "people haven't"} submitted yet: ${pending.slice(0, 8).join(", ")}${pending.length > 8 ? `, and ${pending.length - 8} more` : ""}.\n\nLock voting anyway? Their stars so far will still be counted.`
+    : "Lock voting? Participants will no longer be able to change their stars.";
+  const [reminded, setReminded] = useState("");
+  const remind = () =>
+    run(async () => {
+      const r = await api.adminRemind(sid);
+      setReminded(`Reminder sent to ${r.reminded} ${r.reminded === 1 ? "person" : "people"}.`);
+      setTimeout(() => setReminded(""), 5000);
+    });
   const startLabel = timer.durationSec ? `Start voting (${fmtDuration(timer.durationSec)} timer)` : "Start voting (no timer)";
   const act = (action: string, seconds?: number) => run(() => api.adminAction(sid, action, seconds));
 
@@ -247,7 +259,7 @@ Once voting starts, participants can no longer add their own ideas${suggested ? 
           {timer.state === "paused" && <button class="secondary" onClick={() => act("resume")}>Resume timer</button>}
           <button class="secondary" onClick={() => act("extend", 60)}>+1 min</button>
           <button class="secondary" onClick={() => act("extend", 300)}>+5 min</button>
-          <button class="primary" onClick={() => confirm("Lock voting? Participants will no longer be able to change their stars.") && act("lock")}>Lock voting</button>
+          <button class="primary" onClick={() => confirm(lockWarning) && act("lock")}>Lock voting</button>
         </div>
       )}
       {phase === "locked" && (
@@ -265,6 +277,22 @@ Once voting starts, participants can no longer add their own ideas${suggested ? 
           <button class="primary" onClick={onPresent}>Present full screen</button>
           <button class="secondary" onClick={() => run(() => api.downloadResultsCsv(sid, state.board.title))}>Download results (CSV)</button>
           <button class="secondary" onClick={() => act("hide")}>Hide results</button>
+        </div>
+      )}
+      {phase === "revealed" && (
+        <p class="hint">Download the CSV and keep it. Hosting can erase boards, and you can rebuild these results later from the home page.</p>
+      )}
+      {phase === "voting" && (
+        <div class="pending">
+          {pending.length === 0 ? (
+            <p class="ok">Everyone who joined has submitted.</p>
+          ) : (
+            <>
+              <p><strong>Not submitted yet ({pending.length}):</strong> {pending.join(", ")}</p>
+              <button class="secondary" onClick={remind}>Remind {pending.length === 1 ? "them" : "everyone"} to submit</button>
+            </>
+          )}
+          <span role="status" class="ok">{reminded}</span>
         </div>
       )}
       {phase === "voting" && timer.durationSec === null && timer.state === "stopped" && <p class="hint">No timer is running. Lock voting when everyone is done.</p>}

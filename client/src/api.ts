@@ -54,6 +54,8 @@ export interface Counts {
   joined: number;
   connected: number;
   submitted: number;
+  /** Names of people who have not pressed Submit. */
+  pending: string[];
 }
 export interface FacilitatorState {
   serverNow: number;
@@ -79,6 +81,7 @@ export interface ResultRow {
 }
 export interface Results {
   named: boolean;
+  restored: boolean;
   totals: { joined: number; submitted: number; voted: number; stars: number };
   rows: ResultRow[];
 }
@@ -88,6 +91,7 @@ export type Push =
   | { type: "votes"; votes: number[] }
   | { type: "refresh" }
   | { type: "deleted" }
+  | { type: "nudge" }
   | ({ type: "counts" } & Counts);
 
 export class ApiError extends Error {
@@ -216,6 +220,9 @@ export function connectLive(
 
 export const createBoard = (input: { title: string; subtitle: string; template: "blank" | "example" }) =>
   call<{ id: string; adminKey: string }>("POST", "/api/sessions", {}, input);
+/** Rebuild a board from a results CSV downloaded earlier. The new board opens with the results showing. */
+export const restoreResults = (title: string, csv: string) =>
+  call<{ id: string; adminKey: string; ideas: number; skipped: number; named: boolean }>("POST", "/api/sessions/restore", {}, { title, csv });
 export const boardExists = (sid: string) => call<{ title: string }>("GET", `/api/s/${encodeURIComponent(sid)}/exists`, {});
 
 // ---- participant ---------------------------------------------------------------------------
@@ -244,6 +251,7 @@ export type ColumnInput = Partial<Pick<Column, "name" | "description" | "color">
 
 export const adminSummary = (sid: string) => call<BoardSummary>("GET", `/api/s/${sid}/admin/summary`, aHeaders(sid));
 export const adminDeleteBoard = (sid: string) => call<{ ok: true }>("DELETE", `/api/s/${sid}` + "/admin", aHeaders(sid));
+export const adminRemind = (sid: string) => call<{ reminded: number }>("POST", A(sid, "remind"), aHeaders(sid));
 export const adminState = (sid: string) => call<FacilitatorState>("GET", A(sid, "state"), aHeaders(sid));
 export const adminBoard = (sid: string, patch: Partial<Pick<BoardMeta, "title" | "subtitle" | "bg">>) =>
   call<{ ok: true }>("PUT", A(sid, "board"), aHeaders(sid), patch);

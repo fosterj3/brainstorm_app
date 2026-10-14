@@ -54,7 +54,9 @@ export function openDb(file: string): DB {
       title TEXT NOT NULL,
       summary TEXT NOT NULL DEFAULT '',
       details TEXT NOT NULL DEFAULT '',
-      author_token TEXT
+      author_token TEXT,
+      restored_stars INTEGER NOT NULL DEFAULT 0,
+      restored_voters TEXT
     );
     CREATE TABLE IF NOT EXISTS participants (
       token TEXT PRIMARY KEY,
@@ -73,5 +75,10 @@ export function openDb(file: string): DB {
     CREATE INDEX IF NOT EXISTS columns_session ON columns(session_id);
     CREATE INDEX IF NOT EXISTS participants_session ON participants(session_id);
   `);
+  // Restored results (from an uploaded CSV) sit beside live votes. Add the columns to databases made before they existed.
+  const icols = db.prepare("PRAGMA table_info(ideas)").all() as { name: string }[];
+  if (!icols.some((c) => c.name === "restored_stars")) {
+    db.exec("ALTER TABLE ideas ADD COLUMN restored_stars INTEGER NOT NULL DEFAULT 0; ALTER TABLE ideas ADD COLUMN restored_voters TEXT;");
+  }
   return db;
 }

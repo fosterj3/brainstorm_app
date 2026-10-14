@@ -5,6 +5,7 @@ import path from "node:path";
 import { openDb, type DB } from "./db";
 import { createThrottle } from "./auth";
 import { getResults, resultsToCsv } from "./results";
+import { restoreResults } from "./restore";
 import { HTTP_STATUS, VoteError } from "./errors";
 import { Hub } from "./hub";
 import {
@@ -13,7 +14,7 @@ import {
 } from "./ideas";
 import { applyAction, getSettings, reconcile, updateSettings, type Action } from "./session";
 import { createSession, deleteSession, getBoardMeta, getSummary, purgeIdle, sessionsWithRunningTimer, touch, updateBoardMeta, verifyAdmin } from "./sessions";
-import { addIdea, countIdeasBy, getCounts, getParticipant, getVotes, join, setSubmitted, setVote } from "./votes";
+import { addIdea, countIdeasBy, getCounts, getParticipant, getPending, getPendingTokens, getVotes, join, setSubmitted, setVote } from "./votes";
 
 export interface AppOptions {
   now?: () => number;
@@ -32,7 +33,8 @@ export function buildApp(db: DB, opts: AppOptions = {}) {
   const createThrottled = createThrottle(opts.createLimit ?? 10, 60 * 60 * 1000, now);
   const hub = new Hub(app.server, db);
 
-  const counts = (sid: string) => ({ ...getCounts(db, sid), connected: hub.connected(sid) });
+  const counts = (sid: string) => ({ ...getCounts(db, sid), connected: hub.connected(sid), pending: getPending(db, sid) });
+  const lastReminder = new Map<string, number>();
   const pushCounts = (sid: string) => hub.toFacilitators(sid, { type: "counts", ...counts(sid) });
   hub.onPresence = pushCounts;
 
@@ -73,6 +75,15 @@ export function buildApp(db: DB, opts: AppOptions = {}) {
   app.post<{ Body: { title?: string; subtitle?: string; template?: string } }>("/api/sessions", async (req) => {
     if (createThrottled.blocked(req.ip)) throw new VoteError("rate_limited", "You have created a lot of boards recently. Please try again later.");
     const result = createSession(db, req.body ?? {}, now());
+    createThrottled.record(req.ip);
+    return result;
+  });
+
+  // Rebuild a board from a results CSV that was downloaded earlier (hosting can forget boards).
+  app.post<{ Body: { title?: string; csv?: string } }>("/api/sessions/restore", async (req) => {
+    if (createThrottled.blocked(req.ip)) throw new VoteError("rate_limited", "You have created a lot of boards recently. Please try again later.");
+    if (typeof req.body?.csv !== "string") throw new VoteError("bad_input", "Choose the results CSV to restore.");
+    const result = restoreResults(db, { title: req.body.title, csv: req.body.csv }, now());
     createThrottled.record(req.ip);
     return result;
   });
@@ -160,6 +171,19 @@ export function buildApp(db: DB, opts: AppOptions = {}) {
 
     type P = { Params: { sid: string } };
     type PI = { Params: { sid: string; id: string } };
+
+    // Nudge everyone who has not submitted. Names only go to the facilitator; participants just see a prompt.
+    fac.post<P>("/api/s/:sid/admin/remind", async (req) => {
+      const sid = req.params.sid;
+      reconcile(db, sid, now());
+      if (getSettings(db, sid).phase !== "voting") throw new VoteError("bad_state", "Reminders can only be sent while voting is open.");
+      const last = lastReminder.get(sid) ?? 0;
+      if (now() - last < 10_000) throw new VoteError("rate_limited", "You just sent a reminder. Give people a few seconds.");
+      lastReminder.set(sid, now());
+      const tokens = getPendingTokens(db, sid);
+      for (const t of tokens) hub.sendToToken(sid, t, { type: "nudge" });
+      return { reminded: tokens.length };
+    });
 
     fac.get<P>("/api/s/:sid/admin/summary", async (req) => getSummary(db, req.params.sid));
 
