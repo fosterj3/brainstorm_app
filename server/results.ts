@@ -14,7 +14,7 @@ export interface ResultRow {
   title: string;
   summary: string;
   /**
-   * The option's score under the poll's method: votes (dots), points ($100 method), Borda points (rank order),
+   * The option's score under the poll's method: votes (dots), points (100 point method), Borda points (rank order),
    * or the average score from 1 to 5 (score). The field keeps its old name so saved files and clients still work.
    */
   stars: number;

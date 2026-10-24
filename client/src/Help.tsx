@@ -163,7 +163,7 @@ export const facilitatorTour = (mode: Mode): Step[] => [
   },
   {
     title: "3. Set the rules",
-    body: <p>In <strong>Run the poll</strong>, choose how people vote (dot voting, rank order, score, or the $100 method), whether results are anonymous or named, whether participants may add options, and set a timer if you want one. Each method has a one-line explanation, and you can change it until voting starts.</p>,
+    body: <p>In <strong>Run the poll</strong>, choose how people vote (dot voting, rank order, score, or the 100 point method), whether results are anonymous or named, whether participants may add options, and set a timer if you want one. Each method has a one-line explanation, and you can change it until voting starts.</p>,
   },
   {
     title: "4. Share the participant link",

@@ -5,7 +5,7 @@ export const METHODS: { id: Method; label: string; blurb: string }[] = [
   { id: "dots", label: "Dot voting", blurb: "Each person spends a fixed number of votes on their favorites." },
   { id: "rank", label: "Rank order", blurb: "Each person puts the options in order, from most to least important." },
   { id: "score", label: "Score", blurb: "Each person rates every option from 1 to 5." },
-  { id: "points", label: "$100 method", blurb: "Each person splits 100 points across the options, giving more to what matters most." },
+  { id: "points", label: "100 point method", blurb: "Each person splits 100 points across the options, giving more to what matters most." },
 ];
 
 /** Move one item to a new place in a list, returning a new list. */

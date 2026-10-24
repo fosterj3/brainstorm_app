@@ -21,7 +21,7 @@ export const CONTENT_PAGES: PageMeta[] = [
   {
     path: "/",
     title: "Ority: get a group to agree on what matters most",
-    description: "Create a poll in under a minute, share one link, and see what your group chooses. Dot voting, ranking, scoring and the $100 method. No accounts needed.",
+    description: "Create a poll in under a minute, share one link, and see what your group chooses. Dot voting, ranking, scoring and the 100 point method. No accounts needed.",
     index: true,
     content: true,
   },
@@ -34,8 +34,8 @@ export const CONTENT_PAGES: PageMeta[] = [
   },
   {
     path: "/voting-methods",
-    title: "Voting methods: dots, ranking, scoring and $100 | Ority",
-    description: "See how dot voting, rank order, scoring and the $100 method work, how results are counted, and which one fits your decision.",
+    title: "Voting methods: dots, ranking, scoring, 100 points | Ority",
+    description: "See how dot voting, rank order, scoring and the 100 point method work, how results are counted, and which one fits your decision.",
     index: true,
     content: true,
   },

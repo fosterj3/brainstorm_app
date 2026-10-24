@@ -40,7 +40,7 @@ export const FAQS: Faq[] = [
   {
     id: "method",
     q: "Which voting method should I use?",
-    a: "Dot voting suits picking a few favorites. Rank order suits putting a short list in order. Scoring suits comparing many options one by one. The $100 method suits showing how strongly people feel. The voting methods page compares them.",
+    a: "Dot voting suits picking a few favorites. Rank order suits putting a short list in order. Scoring suits comparing many options one by one. The 100 point method suits showing how strongly people feel. The voting methods page compares them.",
     more: { href: "/voting-methods", label: "Compare voting methods" },
   },
   {

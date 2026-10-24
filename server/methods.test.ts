@@ -204,7 +204,7 @@ describe("score ballots and results", () => {
   });
 });
 
-describe("$100 ballots and results", () => {
+describe("100 point ballots and results", () => {
   it("accepts any split up to 100, drops zeros, and rejects negatives and totals over 100", () => {
     const p = poll("points", 4);
     expect(() => p.ballot(0, { 1: 60, 2: 0, 3: 10 })).not.toThrow();

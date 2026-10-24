@@ -1,6 +1,6 @@
 # Ority
 
-Ority (formerly brainstorm_app) is being evolved into a multi-purpose prioritization product. Phases: (1) rebrand and design tokens, (2) language and data-model generalization (poll, options, votes, organizer), (3) voting methods (dots, rank, score, $100), (4) open polls with deadlines and a one-screen creation flow, (5) website pages and SEO, (6) hosting, persistence, URL and the 50-person load test. Pause for review after each phase. Everything under Server-side invariants stays in force.
+Ority (formerly brainstorm_app) is being evolved into a multi-purpose prioritization product. Phases: (1) rebrand and design tokens, (2) language and data-model generalization (poll, options, votes, organizer), (3) voting methods (dots, rank, score, 100 point), (4) open polls with deadlines and a one-screen creation flow, (5) website pages and SEO, (6) hosting, persistence, URL and the 50-person load test. Pause for review after each phase. Everything under Server-side invariants stays in force.
 
 A web app where anyone can run a prioritization vote. An organizer creates a poll (options, optionally in colored groups), shares one link, and participants vote for their top choices, in a live timed session or, soon, an open poll with a deadline. The organizer locks voting and reveals ranked results.
 

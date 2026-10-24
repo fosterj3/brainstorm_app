@@ -127,7 +127,7 @@ export function MethodsPage() {
               <tr><th scope="row">Dot voting</th><td>Spends a few votes</td><td>Low</td><td>Votes per option</td></tr>
               <tr><th scope="row">Rank order</th><td>Puts options in order</td><td>Medium</td><td>Borda points per option</td></tr>
               <tr><th scope="row">Score</th><td>Rates from 1 to 5</td><td>Medium</td><td>Average score per option</td></tr>
-              <tr><th scope="row">$100 method</th><td>Splits 100 points</td><td>Higher</td><td>Total points per option</td></tr>
+              <tr><th scope="row">100 point method</th><td>Splits 100 points</td><td>Higher</td><td>Total points per option</td></tr>
             </tbody>
           </table>
         </div>

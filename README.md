@@ -104,13 +104,13 @@ The organizer picks how people vote under **Settings, How people vote** (before 
 | **Dot voting** (default) | Spends a fixed number of votes on their favorites. | The number of votes each option received. |
 | **Rank order** | Puts the options in order, favorite first. Drag the handle, or use the up and down buttons (keyboard friendly). With 10 options or fewer they rank all of them; with more they choose and order their top 5. | Borda count. With K ranking places, 1st earns K points, 2nd K-1, down to 1, and unranked options earn 0. Points add up across everyone. |
 | **Score** | Rates options from 1 to 5. Skipping an option is fine. | The average of the scores. Equal averages are separated by the number of ratings, and unrated options come last. |
-| **$100 method** | Splits 100 points across the options. They can save a draft, but must use exactly 100 to submit. | The total points each option received. |
+| **100 point method** | Splits 100 points across the options. They can save a draft, but must use exactly 100 to submit. | The total points each option received. |
 
 In every method, ties share a rank and the next rank skips (1, 2, 2, 4). The server checks every ballot against the method's rules (rank places unique and starting at 1, scores 1 to 5, points whole numbers adding to at most 100), plus the phase and that every option belongs to the poll. Results stay hidden until the organizer reveals them, for every method, and participants only ever receive their own ballot.
 
 Notes:
 - The method cannot change once voting starts. The "votes per person" setting only applies to dot voting.
-- In rank, score and points polls, merging two options is blocked once either has votes, because those votes cannot be added together sensibly. Deleting an option after people have voted is allowed (the organizer sees a warning); rank ballots are tidied to 1, 2, 3 when counted, and a $100 ballot that is left short of 100 will need its owner to finish it.
+- In rank, score and points polls, merging two options is blocked once either has votes, because those votes cannot be added together sensibly. Deleting an option after people have voted is allowed (the organizer sees a warning); rank ballots are tidied to 1, 2, 3 when counted, and a 100 point ballot that is left short of 100 will need its owner to finish it.
 - Unsubmitted ballots still count, as with dot voting. "Submit" tells the organizer someone is done. If someone edits a submitted ballot so it is no longer complete, the submitted mark is removed.
 - The results CSV labels its score column by method (`Votes`, `Points`, `Borda points`, or `Average score` plus `Ratings`). Restoring from a CSV rebuilds a dot-style poll from the numbers, so it works for votes, points and Borda points, but not for average scores.
 ## Data model notes
