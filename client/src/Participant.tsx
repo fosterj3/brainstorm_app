@@ -3,6 +3,7 @@ import * as api from "./api";
 import type { Board as BoardData } from "./api";
 import { Board } from "./Board";
 import { Countdown, remainingMs } from "./Countdown";
+import { ParticipantHelp, ParticipantWelcome } from "./Help";
 
 /** Make sure a subtitle ends with punctuation before more text follows it. */
 const withStop = (s: string) => (/[.!?:]$/.test(s.trim()) ? s.trim() : `${s.trim()}.`);
@@ -102,6 +103,7 @@ function JoinForm({ sid, board, onJoined }: { sid: string; board: BoardData; onJ
         {error && <p id="name-error" role="alert" class="error">{error}</p>}
         <button class="primary" type="submit" disabled={busy || !name.trim()}>Join</button>
       </form>
+      <ParticipantWelcome votes={board.settings.votesPerPerson} />
     </main>
   );
 }
@@ -194,6 +196,7 @@ function Voting(props: { sid: string; data: BoardData; setData: SetData; refresh
         <p class="lead">
           {withStop(data.board.subtitle || "Choose the ideas you feel most strongly about")} Star up to {settings.votesPerPerson}, then press Submit. Your picks are private.
         </p>
+        <ParticipantHelp votes={settings.votesPerPerson} canAdd={settings.ideasOpen && settings.phase === "setup"} />
         {settings.phase === "setup" && (
           <p class="notice">
             Waiting for the facilitator to start voting. You can read the ideas now.

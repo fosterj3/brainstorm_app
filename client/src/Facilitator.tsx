@@ -4,6 +4,7 @@ import type { FacilitatorState } from "./api";
 import { Board } from "./Board";
 import { BoardEditor, type Run } from "./BoardEditor";
 import { Countdown } from "./Countdown";
+import { FacilitatorHelp } from "./Help";
 import { Presentation, ResultsPanel } from "./Results";
 
 const PRESETS = [1, 2, 3, 5, 10, 15, 20, 30];
@@ -101,6 +102,7 @@ function Dashboard({ sid, onLostAccess }: { sid: string; onLostAccess: () => voi
         {!online && <p class="offline" role="status">Reconnecting…</p>}
       </header>
       <main class="page wide">
+        <FacilitatorHelp />
         <div class="tabs" role="tablist" aria-label="Facilitator sections">
           {tabs.map(([id, label]) => (
             <button key={id} role="tab" id={`tab-${id}`} aria-selected={tab === id} aria-controls={`panel-${id}`} tabIndex={tab === id ? 0 : -1}
