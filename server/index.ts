@@ -1,30 +1,33 @@
 import Fastify, { type FastifyRequest } from "fastify";
-import fastifyStatic from "@fastify/static";
 import fs from "node:fs";
 import path from "node:path";
-import { openDb, type DB } from "./db";
+import { defaultDbPath, openDb, type DB } from "./db";
 import { createThrottle } from "./auth";
 import { getResults, resultsToCsv } from "./results";
 import { restoreResults } from "./restore";
 import { HTTP_STATUS, VoteError } from "./errors";
 import { Hub } from "./hub";
+import { registerStatic } from "./static";
 import {
   createColumn, createIdea, deleteColumn, deleteIdea, exportBoard, importBoard, listColumns, listIdeas, listIdeasForFacilitator,
   mergeIdeas, moveColumn, parseIdeas, updateColumn, updateIdea,
 } from "./ideas";
-import { applyAction, getSettings, reconcile, updateSettings, type Action } from "./session";
-import { createSession, deleteSession, getBoardMeta, getSummary, purgeIdle, sessionsWithRunningTimer, touch, updateBoardMeta, verifyAdmin } from "./sessions";
-import { addIdea, countIdeasBy, getCounts, getParticipant, getPending, getPendingTokens, getVotes, join, setSubmitted, setVote } from "./votes";
+import { applyAction, getSettings, reconcile, updateSettings, type Action, type Method } from "./session";
+import { createSession, deleteSession, getBoardMeta, getSummary, purgeIdle, sessionsWithDeadline, sessionsWithRunningTimer, touch, updateBoardMeta, verifyAdmin, type CreateInput } from "./sessions";
+import { getLimits } from "./ballots";
+import { addIdea, countIdeasBy, getBallot, getCounts, getParticipant, getPending, getPendingTokens, getVotes, join, setBallot, setSubmitted, setVote } from "./votes";
 
 export interface AppOptions {
   now?: () => number;
   /** Set when running behind a hosting proxy so the real client IP (not the proxy's) is used for rate limits. */
   trustProxy?: boolean;
-  /** Boards created per client per hour. */
+  /** Show a visible "this is a demo" notice on every page. For free hosting where polls can be erased. */
+  demoNotice?: boolean;
+  /** Polls created per client per hour. */
   createLimit?: number;
 }
 
-const ACTIONS: Action[] = ["start", "pause", "resume", "extend", "lock", "reopen", "reveal", "hide"];
+const ACTIONS: Action[] = ["start", "pause", "resume", "extend", "lock", "reopen", "reveal", "hide", "close"];
 const IDLE_MS = 90 * 24 * 60 * 60 * 1000;
 
 export function buildApp(db: DB, opts: AppOptions = {}) {
@@ -38,21 +41,27 @@ export function buildApp(db: DB, opts: AppOptions = {}) {
   const pushCounts = (sid: string) => hub.toFacilitators(sid, { type: "counts", ...counts(sid) });
   hub.onPresence = pushCounts;
 
-  // When a running timer reaches zero, mark it ended (and auto-lock if chosen), then tell everyone in that session.
+  // When a running timer reaches zero, or an open poll reaches its deadline, apply it and tell everyone in that
+  // session. This is only a nudge for screens that are open: the stored times are also checked on every request,
+  // so a poll still closes on time if the server slept or restarted. Long waits are re-armed in 12 hour steps.
   const expiry = new Map<string, NodeJS.Timeout>();
+  const MAX_WAIT = 12 * 60 * 60 * 1000;
   const scheduleExpiry = (sid: string) => {
     clearTimeout(expiry.get(sid));
     expiry.delete(sid);
-    const { timer } = getSettings(db, sid);
-    if (timer.state !== "running" || timer.endsAt === null) return;
+    const s = getSettings(db, sid);
+    const due: number[] = [];
+    if (s.timer.state === "running" && s.timer.endsAt !== null) due.push(s.timer.endsAt);
+    if (s.mode === "poll" && s.phase === "voting" && s.deadline !== null) due.push(s.deadline);
+    if (due.length === 0) return;
     const t = setTimeout(() => {
       if (reconcile(db, sid, now())) hub.refreshAll(sid);
       scheduleExpiry(sid);
-    }, Math.max(0, timer.endsAt - now()) + 20);
+    }, Math.min(MAX_WAIT, Math.max(0, Math.min(...due) - now()) + 20));
     t.unref();
     expiry.set(sid, t);
   };
-  for (const sid of sessionsWithRunningTimer(db)) scheduleExpiry(sid);
+  for (const sid of new Set([...sessionsWithRunningTimer(db), ...sessionsWithDeadline(db)])) scheduleExpiry(sid);
 
   purgeIdle(db, now(), IDLE_MS);
   const purger = setInterval(() => purgeIdle(db, now(), IDLE_MS), 6 * 60 * 60 * 1000);
@@ -70,18 +79,33 @@ export function buildApp(db: DB, opts: AppOptions = {}) {
     return reply.code(500).send({ error: "server_error", message: "Something went wrong." });
   });
 
-  // ---- creating a board -------------------------------------------------------------------
+  // ---- health and settings the browser needs ---------------------------------------------------
 
-  app.post<{ Body: { title?: string; subtitle?: string; template?: string } }>("/api/sessions", async (req) => {
-    if (createThrottled.blocked(req.ip)) throw new VoteError("rate_limited", "You have created a lot of boards recently. Please try again later.");
+  // For hosting health checks. It proves the database answers, and says nothing private.
+  app.get("/api/health", async (_req, reply) => {
+    try {
+      db.prepare("SELECT 1 AS ok").get();
+      return { ok: true, storage: db.kind, uptimeSeconds: Math.round(process.uptime()) };
+    } catch {
+      return reply.code(503).send({ ok: false, storage: db.kind });
+    }
+  });
+
+  // Whether to show the demo notice. Nothing else is exposed here.
+  app.get("/api/config", async () => ({ demo: opts.demoNotice === true }));
+
+  // ---- creating a poll -------------------------------------------------------------------
+
+  app.post<{ Body: CreateInput }>("/api/sessions", async (req) => {
+    if (createThrottled.blocked(req.ip)) throw new VoteError("rate_limited", "You have created a lot of polls recently. Please try again later.");
     const result = createSession(db, req.body ?? {}, now());
     createThrottled.record(req.ip);
     return result;
   });
 
-  // Rebuild a board from a results CSV that was downloaded earlier (hosting can forget boards).
+  // Rebuild a poll from a results CSV that was downloaded earlier (hosting can forget polls).
   app.post<{ Body: { title?: string; csv?: string } }>("/api/sessions/restore", async (req) => {
-    if (createThrottled.blocked(req.ip)) throw new VoteError("rate_limited", "You have created a lot of boards recently. Please try again later.");
+    if (createThrottled.blocked(req.ip)) throw new VoteError("rate_limited", "You have created a lot of polls recently. Please try again later.");
     if (typeof req.body?.csv !== "string") throw new VoteError("bad_input", "Choose the results CSV to restore.");
     const result = restoreResults(db, { title: req.body.title, csv: req.body.csv }, now());
     createThrottled.record(req.ip);
@@ -91,7 +115,7 @@ export function buildApp(db: DB, opts: AppOptions = {}) {
   /** Looks up a session for the join screen without revealing anything private. */
   app.get<{ Params: { sid: string } }>("/api/s/:sid/exists", async (req) => {
     const meta = getBoardMeta(db, req.params.sid);
-    if (!meta) throw new VoteError("unknown_session", "We could not find that session. Check the link or code.");
+    if (!meta) throw new VoteError("unknown_session", "We could not find that poll. Check the link or code.");
     return { title: meta.title };
   });
 
@@ -100,7 +124,7 @@ export function buildApp(db: DB, opts: AppOptions = {}) {
   const tokenOf = (req: FastifyRequest) => String(req.headers["x-participant-token"] ?? "");
   const sidOf = (req: FastifyRequest) => {
     const sid = String((req.params as { sid?: string }).sid ?? "");
-    if (!getBoardMeta(db, sid)) throw new VoteError("unknown_session", "We could not find that session. Check the link or code.");
+    if (!getBoardMeta(db, sid)) throw new VoteError("unknown_session", "We could not find that poll. Check the link or code.");
     return sid;
   };
 
@@ -124,7 +148,15 @@ export function buildApp(db: DB, opts: AppOptions = {}) {
       settings: getSettings(db, sid),
       columns: listColumns(db, sid),
       ideas: listIdeas(db, sid),
-      me: me && { name: me.name, votes: getVotes(db, sid, me.token), ideasAdded: countIdeasBy(db, sid, me.token), submitted: !!me.submitted },
+      limits: getLimits(db, sid),
+      me: me && {
+        name: me.name,
+        votes: getVotes(db, sid, me.token),
+        /** Option id to value: 1 per dot, or a rank, score or points. Only this person's own ballot. */
+        ballot: getBallot(db, sid, me.token),
+        ideasAdded: countIdeasBy(db, sid, me.token),
+        submitted: !!me.submitted,
+      },
     };
   });
 
@@ -134,6 +166,28 @@ export function buildApp(db: DB, opts: AppOptions = {}) {
     const votes = setVote(db, sid, token, Number(req.params.id), req.body?.starred === true, now());
     hub.sendToToken(sid, token, { type: "votes", votes }); // keeps a second tab/device in step
     return { votes };
+  });
+
+  // Open polls only: once the poll has closed, and only if the organizer chose to share, anyone who joined can see the
+  // results. They are always anonymous here, even when the organizer sees names.
+  app.get<{ Params: { sid: string } }>("/api/s/:sid/results", async (req) => {
+    const sid = sidOf(req);
+    reconcile(db, sid, now());
+    if (!getParticipant(db, sid, tokenOf(req))) throw new VoteError("unknown_participant", "Join the poll to see its results.");
+    const s = getSettings(db, sid);
+    if (s.mode !== "poll" || !s.shareResults || s.phase !== "revealed") throw new VoteError("bad_state", "The organizer has not shared the results.");
+    return getResults(db, sid, { anonymous: true });
+  });
+
+  // Rank, score and points polls: the whole ballot is sent and checked at once. Dot polls use the route above.
+  app.put<{ Params: { sid: string }; Body: { values?: unknown } }>("/api/s/:sid/ballot", async (req) => {
+    const sid = sidOf(req);
+    const token = tokenOf(req);
+    const result = setBallot(db, sid, token, req.body?.values ?? {}, now());
+    touch(db, sid, now());
+    hub.sendToToken(sid, token, { type: "votes", votes: result.votes, ballot: result.ballot }); // keeps a second tab/device in step
+    pushCounts(sid);
+    return result;
   });
 
   app.put<{ Params: { sid: string }; Body: { submitted?: boolean } }>("/api/s/:sid/submitted", async (req) => {
@@ -154,12 +208,12 @@ export function buildApp(db: DB, opts: AppOptions = {}) {
     return { idea, ideasAdded: countIdeasBy(db, sid, token) };
   });
 
-  // ---- facilitator (secret key in the x-admin-key header) ----------------------------------
+  // ---- organizer (secret key in the x-admin-key header) ----------------------------------
 
   app.register(async (fac) => {
     fac.addHook("preHandler", async (req) => {
       const sid = String((req.params as { sid?: string }).sid ?? "");
-      if (!verifyAdmin(db, sid, String(req.headers["x-admin-key"] ?? ""))) throw new VoteError("unauthorized", "This facilitator link is not valid.");
+      if (!verifyAdmin(db, sid, String(req.headers["x-admin-key"] ?? ""))) throw new VoteError("unauthorized", "This organizer link is not valid.");
       touch(db, sid, now());
     });
 
@@ -172,7 +226,7 @@ export function buildApp(db: DB, opts: AppOptions = {}) {
     type P = { Params: { sid: string } };
     type PI = { Params: { sid: string; id: string } };
 
-    // Nudge everyone who has not submitted. Names only go to the facilitator; participants just see a prompt.
+    // Nudge everyone who has not submitted. Names only go to the organizer; participants just see a prompt.
     fac.post<P>("/api/s/:sid/admin/remind", async (req) => {
       const sid = req.params.sid;
       reconcile(db, sid, now());
@@ -206,6 +260,7 @@ export function buildApp(db: DB, opts: AppOptions = {}) {
         settings: getSettings(db, sid),
         columns: listColumns(db, sid),
         ideas: listIdeasForFacilitator(db, sid),
+        limits: getLimits(db, sid),
         counts: counts(sid),
       };
     });
@@ -219,21 +274,24 @@ export function buildApp(db: DB, opts: AppOptions = {}) {
     fac.put<P & { Body: Record<string, unknown> }>("/api/s/:sid/admin/settings", async (req) => {
       const b = req.body ?? {};
       updateSettings(db, req.params.sid, {
+        method: b.method as Method | undefined,
         votesPerPerson: b.votesPerPerson as number | undefined,
         ideasPerPerson: b.ideasPerPerson as number | undefined,
         ideasOpen: b.ideasOpen as boolean | undefined,
         namedResults: b.namedResults as boolean | undefined,
         autoLock: b.autoLock as boolean | undefined,
         timerSeconds: b.timerSeconds as number | null | undefined,
-      });
+        deadline: b.deadline as number | null | undefined,
+        shareResults: b.shareResults as boolean | undefined,
+      }, now());
       changed(req.params.sid);
       return { ok: true };
     });
 
-    fac.post<P & { Body: { action?: Action; seconds?: number } }>("/api/s/:sid/admin/action", async (req) => {
+    fac.post<P & { Body: { action?: Action; seconds?: number; deadline?: number | null } }>("/api/s/:sid/admin/action", async (req) => {
       const action = req.body?.action;
       if (!action || !ACTIONS.includes(action)) throw new VoteError("bad_input", "Unknown action.");
-      applyAction(db, req.params.sid, action, now(), req.body?.seconds);
+      applyAction(db, req.params.sid, action, now(), req.body?.seconds, req.body && "deadline" in req.body ? { deadline: req.body.deadline } : {});
       changed(req.params.sid);
       return { ok: true };
     });
@@ -298,7 +356,7 @@ export function buildApp(db: DB, opts: AppOptions = {}) {
 
     fac.get<P>("/api/s/:sid/admin/export", async (req) => exportBoard(db, req.params.sid));
 
-    // Results exist only after the facilitator reveals them (getResults enforces this).
+    // Results exist only after the organizer reveals them (getResults enforces this).
     fac.get<P>("/api/s/:sid/admin/results", async (req) => getResults(db, req.params.sid));
 
     fac.get<P>("/api/s/:sid/admin/results.csv", async (req, reply) => {
@@ -312,19 +370,12 @@ export function buildApp(db: DB, opts: AppOptions = {}) {
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.meta.dirname, "index.ts");
 if (isMain) {
-  const db = openDb(process.env.DB_PATH ?? "data/brainstorm.db");
-  const app = buildApp(db, { trustProxy: process.env.TRUST_PROXY === "1" });
+  const db = openDb(defaultDbPath(process.env.DB_PATH), process.env.STORAGE ?? "sqlite");
+  const app = buildApp(db, { trustProxy: process.env.TRUST_PROXY === "1", demoNotice: process.env.DEMO_NOTICE === "1" });
   const dist = path.resolve(import.meta.dirname, "../dist");
-  if (fs.existsSync(dist)) {
-    await app.register(fastifyStatic, { root: dist });
-    // Single-page app: /s/<code>, /f/<code> and other client routes serve index.html.
-    app.setNotFoundHandler((req, reply) =>
-      req.method === "GET" && !req.url.startsWith("/api") && !req.url.startsWith("/ws")
-        ? reply.sendFile("index.html")
-        : reply.code(404).send({ error: "not_found", message: "Not found." }),
-    );
-  }
+  if (fs.existsSync(dist)) await registerStatic(app, dist);
   const port = Number(process.env.PORT ?? 3000);
-  await app.listen({ port, host: "0.0.0.0" });
-  console.log(`Brainstorm app listening on http://localhost:${port}`);
+  // A longer queue for new connections, so a crowd that arrives at once is not turned away.
+  await app.listen({ port, host: "0.0.0.0", backlog: 1024 });
+  console.log(`Ority listening on http://localhost:${port} (storage: ${db.kind}, ${db.location})`);
 }

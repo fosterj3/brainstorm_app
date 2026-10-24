@@ -1,13 +1,19 @@
-# Render blueprint, free plan.
-# Free web services sleep after ~15 minutes without traffic and have no persistent disk, so boards are
-# forgotten when the service restarts. Fine for trying the app and for a session you run in one sitting.
-# For boards that must survive, use a paid plan with a disk (see README).
+# Ority on Render, free plan.
+# Free web services sleep after ~15 minutes without traffic and have no persistent disk, so polls are
+# forgotten when the service restarts. Fine for trying Ority and for a session you run in one sitting.
+# For polls that must survive, use a paid plan with a disk (see README).
 services:
   - type: web
-    name: brainstorm-app
+    # Renaming a blueprint service makes Render create a NEW service (and a new URL). To keep the existing
+    # one, rename it in the Render dashboard first. See README, Hosting.
+    name: ority
     runtime: docker
     plan: free
     healthCheckPath: /
     envVars:
       - key: TRUST_PROXY
+        value: "1"
+      # Free hosting erases polls when the service sleeps or restarts, so say so on every page.
+      # Remove this when you move to a plan with a persistent disk (see docs/HOSTING.md).
+      - key: DEMO_NOTICE
         value: "1"

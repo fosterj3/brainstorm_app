@@ -298,9 +298,9 @@ describe("facilitator controls end to end", () => {
     const idea = (await api("POST", `/api/s/${b.sid}/admin/ideas`, h, { columnId: col.id, title: "Card", summary: "s", details: "long", audience: "For all" })).body.idea;
     const board = (await api("GET", `/api/s/${b.sid}/board`)).body;
     expect(board.board).toMatchObject({ title: "Renamed", bg: "#fff8e1" });
-    expect(board.columns.map((c: any) => c.name)).toEqual(["Beta", "Alpha", "Ideas from the group"]);
+    expect(board.columns.map((c: any) => c.name)).toEqual(["Beta", "Alpha", "Other options"]);
     expect(board.columns[0].color).toBe("#654321");
-    expect(board.ideas.find((i: any) => i.id === idea.id)).toMatchObject({ details: "long", audience: "For all", code: "B1" });
+    expect(board.ideas.find((i: any) => i.id === idea.id)).toMatchObject({ details: "long", audience: "For all", code: "" });
   });
 
   it("imports CSV and exports the board", async () => {
@@ -375,9 +375,9 @@ describe("results", () => {
     expect(res.headers.get("content-type")).toContain("text/csv");
     expect(res.headers.get("cache-control")).toBe("no-store");
     const csv = await res.text();
-    expect(csv).toContain("Rank,Tied,Code,Idea,Column,Audience,Stars");
+    expect(csv).toContain("Rank,Tied,Code,Option,Group,Tag,Votes");
     expect(csv).toContain(",One,Alpha,,2");
-    expect(csv).not.toMatch(/Alex|Sam|Starred by/);
+    expect(csv).not.toMatch(/Alex|Sam|Voted by|Starred by/);
     expect((await fetch(`http://${base}/api/s/${b.sid}/admin/results.csv`)).status).toBe(401);
   });
 
@@ -462,7 +462,7 @@ describe("restoring results over the API", () => {
   it("rejects a file that is not a results file, and creates no board", async () => {
     const bad = await api("POST", "/api/sessions/restore", {}, { title: "Nope", csv: "name,age\nAnn,3\n" });
     expect(bad.status).toBe(400);
-    expect(bad.body.message).toContain("Idea");
+    expect(bad.body.message).toContain("Option");
     expect((await api("POST", "/api/sessions/restore", {}, { title: "Nope" })).status).toBe(400);
     expect((db.prepare("SELECT COUNT(*) AS n FROM sessions").get() as { n: number }).n).toBe(0);
   });

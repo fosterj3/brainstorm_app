@@ -1,17 +1,24 @@
 import { useEffect, useState } from "preact/hooks";
 import * as api from "./api";
-import type { FacilitatorState } from "./api";
+import type { FacilitatorState, Settings } from "./api";
 import { Board } from "./Board";
 import { BoardEditor, type Run } from "./BoardEditor";
 import { Countdown } from "./Countdown";
 import { facilitatorTour, Tour, TourButton, useTour } from "./Help";
+import { METHODS } from "./methods";
+import { Loading, Wordmark } from "./Site";
 import { Presentation, ResultsPanel } from "./Results";
+import { formatWhen, fromLocalInput, toLocalInput, untilText } from "./time";
 
 const PRESETS = [1, 2, 3, 5, 10, 15, 20, 30];
 const PHASE_LABEL = { setup: "Setting up", voting: "Voting open", locked: "Voting locked", revealed: "Results showing" } as const;
 type Tab = "run" | "build" | "preview" | "results";
 
-/** The facilitator's secret arrives in the link's #fragment (never sent to the server); keep it on this device. */
+/** The status chip text. Open polls are simply open or closed. */
+const phaseLabel = (s: Settings) =>
+  s.mode === "poll" ? (s.phase === "voting" ? "Open" : "Closed") : PHASE_LABEL[s.phase];
+
+/** The organizer's secret arrives in the link's #fragment (never sent to the server); keep it on this device. */
 function adoptKeyFromLink(sid: string) {
   const key = location.hash.replace(/^#/, "");
   if (key) {
@@ -26,8 +33,8 @@ export function Facilitator({ sid }: { sid: string }) {
   if (!hasKey) {
     return (
       <main class="page narrow">
-        <h1>Facilitator link needed</h1>
-        <p>This device does not have facilitator access to this session. Open the private facilitator link you were given when you created it.</p>
+        <h1>Organizer link needed</h1>
+        <p>This device does not have organizer access to this poll. Open the private organizer link you were given when you created it.</p>
         <p><a href="/">Go to the home page</a></p>
       </main>
     );
@@ -68,10 +75,10 @@ function Dashboard({ sid, onLostAccess }: { sid: string; onLostAccess: () => voi
   }, []);
 
   useEffect(() => {
-    if (state) document.title = `${state.board.title} (facilitator)`;
+    if (state) document.title = `${state.board.title} (organizer)`;
   }, [state?.board.title]);
 
-  /** Run a facilitator action, surfacing any error; the server pushes the new state back to us. */
+  /** Run an organizer action, surfacing any error; the server pushes the new state back to us. */
   const run: Run = async (fn) => {
     setError("");
     try {
@@ -84,28 +91,30 @@ function Dashboard({ sid, onLostAccess }: { sid: string; onLostAccess: () => voi
     }
   };
 
-  if (!state) return <main class="page"><p>{error || "Loading…"}</p></main>;
+  if (!state) return <main class="page">{error ? <p role="alert" class="error">{error}</p> : <Loading label="Loading your poll…" />}</main>;
   const { settings, counts } = state;
   const { phase, timer } = settings;
 
-  const tabs: [Tab, string][] = [["run", "Run the session"], ["build", "Build the board"], ["preview", "Preview"], ["results", "Results"]];
+  const tabs: [Tab, string][] = [["run", "Run the poll"], ["build", "Build the poll"], ["preview", "Preview"], ["results", "Results"]];
 
   return (
     <>
-      {tour.open && <Tour title="Facilitator tour" steps={facilitatorTour} onClose={tour.close} />}
+      {tour.open && <Tour title="Organizer tour" steps={facilitatorTour(settings.mode)} onClose={tour.close} />}
       <header class="bar">
         <div class="bar-inner">
+          <Wordmark />
           <strong class="bar-title">{state.board.title}</strong>
-          <span class="phase" data-phase={phase}>{PHASE_LABEL[phase]}</span>
+          <span class="phase" data-phase={phase}>{phaseLabel(settings)}</span>
+          {settings.mode === "poll" && phase === "voting" && settings.deadline !== null && <span class="hint">Closes {formatWhen(settings.deadline)}</span>}
           {timer.state !== "stopped" && <Countdown timer={timer} offset={offset} />}
           {counts.joined > 0 && <span class="hint">{counts.submitted} of {counts.joined} submitted</span>}
           <TourButton onClick={tour.start} />
-          <a href="/" class="hint">My boards</a>
+          <a href="/" class="hint">Your polls</a>
         </div>
         {!online && <p class="offline" role="status">Reconnecting…</p>}
       </header>
       <main class="page wide">
-        <div class="tabs" role="tablist" aria-label="Facilitator sections">
+        <div class="tabs" role="tablist" aria-label="Organizer sections">
           {tabs.map(([id, label]) => (
             <button key={id} role="tab" id={`tab-${id}`} aria-selected={tab === id} aria-controls={`panel-${id}`} tabIndex={tab === id ? 0 : -1}
               class={`tab${tab === id ? " active" : ""}`} onClick={() => setTab(id)}
@@ -127,7 +136,9 @@ function Dashboard({ sid, onLostAccess }: { sid: string; onLostAccess: () => voi
           {tab === "run" && (
             <>
               <SharePanel sid={sid} counts={counts} />
-              <Controls sid={sid} state={state} run={run} onRevealed={() => setTab("results")} onPresent={() => setPresenting(true)} />
+              {settings.mode === "poll"
+                ? <PollControls sid={sid} state={state} run={run} onPresent={() => setPresenting(true)} onClosed={() => setTab("results")} />
+                : <Controls sid={sid} state={state} run={run} onRevealed={() => setTab("results")} onPresent={() => setPresenting(true)} />}
               <SettingsPanel sid={sid} state={state} run={run} />
               <DeletePanel sid={sid} title={state.board.title} run={run} />
             </>
@@ -136,7 +147,9 @@ function Dashboard({ sid, onLostAccess }: { sid: string; onLostAccess: () => voi
             <>
               {phase !== "setup" && (
                 <p class="notice warn" role="note">
-                  Voting has started, so participants can no longer add their own ideas. You can still edit the board yourself, but changing or deleting ideas now affects the votes already cast.
+                  {settings.mode === "poll"
+                    ? "This poll is open. You can still edit it, but changing or deleting options now affects the votes already cast."
+                    : "Voting has started, so participants can no longer add their own options. You can still edit the poll yourself, but changing or deleting options now affects the votes already cast."}
                 </p>
               )}
               <BoardEditor sid={sid} state={state} run={run} />
@@ -144,7 +157,7 @@ function Dashboard({ sid, onLostAccess }: { sid: string; onLostAccess: () => voi
           )}
           {tab === "preview" && <Preview state={state} />}
           {tab === "results" && (
-            <ResultsPanel sid={sid} title={state.board.title} columns={state.columns} revealed={settings.phase === "revealed"} onPresent={() => setPresenting(true)} run={run} />
+            <ResultsPanel sid={sid} title={state.board.title} columns={state.columns} revealed={settings.phase === "revealed"} mode={settings.mode} onPresent={() => setPresenting(true)} run={run} />
           )}
         </div>
       </main>
@@ -162,8 +175,8 @@ function Preview({ state }: { state: FacilitatorState }) {
     return () => { document.body.style.background = prev; };
   }, [state.board.bg]);
   return (
-    <section aria-label="Board preview">
-      <p class="hint">This is what participants see, without stars.</p>
+    <section aria-label="Poll preview">
+      <p class="hint">This is what participants see, without the voting buttons.</p>
       <h1>{state.board.title}</h1>
       {state.board.subtitle && <p class="lead">{state.board.subtitle}</p>}
       <Board columns={state.columns} ideas={state.ideas} showEmptyGroup={state.settings.ideasOpen} />
@@ -201,9 +214,9 @@ function SharePanel({ sid, counts }: { sid: string; counts: FacilitatorState["co
       <h2 id="h-share">Share and participants</h2>
       <CopyField id="share-link" label="Link for participants" value={`${location.origin}/s/${sid}`} note={`Or give them the code ${sid} on the home page.`} />
       <CopyField
-        id="admin-link" label="Your private facilitator link"
+        id="admin-link" label="Your private organizer link"
         value={`${location.origin}/f/${sid}#${key}`}
-        note="Keep this to yourself and bookmark it. Anyone with it can run this session, and it is the only way back in from another device."
+        note="Keep this to yourself and bookmark it. Anyone with it can run this poll, and it is the only way back in from another device."
       />
       <p class="stats">
         <span><strong>{counts.joined}</strong> joined</span>
@@ -211,6 +224,98 @@ function SharePanel({ sid, counts }: { sid: string; counts: FacilitatorState["co
         <span><strong>{counts.submitted}</strong> of {counts.joined} submitted</span>
       </p>
       <p class="hint">You see only how many people have submitted, never what anyone picked.</p>
+    </section>
+  );
+}
+
+/** Open polls: no start button, because voting is open from the start. Change the closing time, close early, or reopen. */
+function PollControls({ sid, state, run, onPresent, onClosed }: { sid: string; state: FacilitatorState; run: Run; onPresent: () => void; onClosed: () => void }) {
+  const { settings, counts } = state;
+  const { deadline } = settings;
+  const open = settings.phase === "voting";
+  const [when, setWhen] = useState(deadline ? toLocalInput(deadline) : "");
+  const [reminded, setReminded] = useState("");
+  const [now, setNow] = useState(Date.now());
+  // Show the current closing time while open. When closed, only offer it again if it is still in the future.
+  useEffect(() => setWhen(deadline && (open || deadline > Date.now()) ? toLocalInput(deadline) : ""), [deadline, open]);
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
+  const pending = counts.pending;
+  const picked = fromLocalInput(when);
+  const closeNow = () => {
+    const note = pending.length
+      ? `${pending.length} ${pending.length === 1 ? "person has" : "people have"} not submitted yet: ${pending.slice(0, 8).join(", ")}${pending.length > 8 ? `, and ${pending.length - 8} more` : ""}.\n\nTheir votes so far still count. `
+      : "";
+    return confirm(`${note}Close the poll now? Nobody can vote after this, and the results appear for you. You can reopen it later.`) && run(async () => { await api.adminAction(sid, "close"); onClosed(); });
+  };
+  const remind = () =>
+    run(async () => {
+      const r = await api.adminRemind(sid);
+      setReminded(`Reminder sent to ${r.reminded} ${r.reminded === 1 ? "person" : "people"} who have the poll open.`);
+      setTimeout(() => setReminded(""), 5000);
+    });
+  const setClosing = (ms: number | null) => run(() => api.adminSettings(sid, { deadline: ms }));
+
+  return (
+    <section class="panel" aria-labelledby="h-controls">
+      <h2 id="h-controls">{open ? "This poll is open" : "This poll is closed"}</h2>
+      {open ? (
+        <>
+          <p>
+            {deadline !== null
+              ? <>It closes by itself on <strong>{formatWhen(deadline)}</strong> ({untilText(deadline, now)}), and the results appear for you then.</>
+              : <>It has no closing time. Close it yourself when everyone has had a chance to vote.</>}
+          </p>
+          <div class="field">
+            <label for="deadline">Closing time</label>
+            <div class="row wrap">
+              <input id="deadline" type="datetime-local" value={when} onInput={(e) => setWhen((e.target as HTMLInputElement).value)} />
+              <button class="secondary" disabled={picked === null || picked === deadline} onClick={() => picked !== null && setClosing(picked)}>Save closing time</button>
+              <button class="secondary" onClick={() => setClosing((deadline ?? Date.now()) + 24 * 3600_000)}>+1 day</button>
+              <button class="secondary" onClick={() => setClosing((deadline ?? Date.now()) + 7 * 24 * 3600_000)}>+1 week</button>
+              {deadline !== null && <button class="link" onClick={() => setClosing(null)}>Remove closing time</button>}
+            </div>
+            <span class="hint">Shown in your time zone. Everyone sees the same moment in theirs.</span>
+          </div>
+          <p class="row"><button class="primary" onClick={closeNow}>Close poll now</button></p>
+          <div class="pending">
+            {counts.joined === 0 ? <p class="hint">Nobody has joined yet. Share the participant link above.</p>
+              : pending.length === 0 ? <p class="ok">Everyone who joined has submitted.</p>
+              : (
+                <>
+                  <p><strong>Joined but not submitted ({pending.length}):</strong> {pending.join(", ")}</p>
+                  <button class="secondary" onClick={remind}>Remind them</button>
+                  <p class="hint">Reminders only reach people who have the poll open right now. For everyone else, send the link again.</p>
+                </>
+              )}
+            <span role="status" class="ok">{reminded}</span>
+          </div>
+        </>
+      ) : (
+        <>
+          <p>It closed{deadline !== null && deadline <= now ? <> on {formatWhen(deadline)}</> : null}. Nobody can vote now. The results are in the Results tab.</p>
+          <div class="row wrap">
+            <button class="primary" onClick={onPresent}>Present full screen</button>
+            <button class="secondary" onClick={() => run(() => api.downloadResultsCsv(sid, state.board.title))}>Download results (CSV)</button>
+          </div>
+          <p class="hint">Download the CSV and keep it. Hosting can erase polls, and you can rebuild these results later from the home page.</p>
+          <div class="field reopen">
+            <label for="reopen-when">Reopen the poll</label>
+            <div class="row wrap">
+              <input id="reopen-when" type="datetime-local" value={when} onInput={(e) => setWhen((e.target as HTMLInputElement).value)} aria-describedby="reopen-hint" />
+              <button
+                class="secondary" disabled={when !== "" && picked === null}
+                onClick={() => confirm("Reopen this poll? The results are hidden again and people can change their votes.") && run(() => api.adminAction(sid, "reopen", undefined, { deadline: when === "" ? null : picked }))}
+              >
+                Reopen
+              </button>
+            </div>
+            <span class="hint" id="reopen-hint">Choose a new closing time, or leave it empty to reopen with no closing time.</span>
+          </div>
+        </>
+      )}
     </section>
   );
 }
@@ -226,11 +331,11 @@ function Controls({ sid, state, run, onRevealed, onPresent }: { sid: string; sta
   const suggested = state.ideas.filter((i) => i.author).length;
   const startWarning = `Start voting now?
 
-Once voting starts, participants can no longer add their own ideas${suggested ? ` (${suggested} suggested so far)` : ""}. You can still edit the board yourself.`;
+Once voting starts, participants can no longer add their own options${suggested ? ` (${suggested} suggested so far)` : ""}. You can still edit the poll yourself.`;
   const pending = state.counts.pending;
   const lockWarning = pending.length
-    ? `${pending.length} ${pending.length === 1 ? "person hasn't" : "people haven't"} submitted yet: ${pending.slice(0, 8).join(", ")}${pending.length > 8 ? `, and ${pending.length - 8} more` : ""}.\n\nLock voting anyway? Their stars so far will still be counted.`
-    : "Lock voting? Participants will no longer be able to change their stars.";
+    ? `${pending.length} ${pending.length === 1 ? "person hasn't" : "people haven't"} submitted yet: ${pending.slice(0, 8).join(", ")}${pending.length > 8 ? `, and ${pending.length - 8} more` : ""}.\n\nLock voting anyway? Their votes so far will still be counted.`
+    : "Lock voting? Participants will no longer be able to change their votes.";
   const [reminded, setReminded] = useState("");
   const remind = () =>
     run(async () => {
@@ -248,12 +353,12 @@ Once voting starts, participants can no longer add their own ideas${suggested ? 
         <>
           <TimerPicker sid={sid} durationSec={timer.durationSec} run={run} />
           <p class="notice warn" role="note">
-            <strong>Heads up:</strong> once you start voting, participants can no longer add their own ideas. Finish adding ideas first.
-            {suggested > 0 && <> {suggested} {suggested === 1 ? "idea has" : "ideas have"} been suggested by participants so far.</>}
+            <strong>Heads up:</strong> once you start voting, participants can no longer add their own options. Finish adding options first.
+            {suggested > 0 && <> {suggested} {suggested === 1 ? "option has" : "options have"} been suggested by participants so far.</>}
           </p>
           <p class="row">
             <button class="primary" disabled={noIdeas} onClick={() => confirm(startWarning) && act("start")}>{startLabel}</button>
-            {noIdeas && <span class="hint">Add ideas on the “Build the board” tab first.</span>}
+            {noIdeas && <span class="hint">Add options on the “Build the poll” tab first.</span>}
           </p>
         </>
       )}
@@ -284,7 +389,7 @@ Once voting starts, participants can no longer add their own ideas${suggested ? 
         </div>
       )}
       {phase === "revealed" && (
-        <p class="hint">Download the CSV and keep it. Hosting can erase boards, and you can rebuild these results later from the home page.</p>
+        <p class="hint">Download the CSV and keep it. Hosting can erase polls, and you can rebuild these results later from the home page.</p>
       )}
       {phase === "voting" && (
         <div class="pending">
@@ -348,32 +453,57 @@ function SettingsPanel({ sid, state, run }: { sid: string; state: FacilitatorSta
   return (
     <section class="panel" aria-labelledby="h-settings">
       <h2 id="h-settings">Settings</h2>
+      <fieldset class="field method-field">
+        <legend>How people vote</legend>
+        {METHODS.map((m) => (
+          <label class="method-option" key={m.id}>
+            <input type="radio" name="method" checked={s.method === m.id} disabled={!setup} onChange={() => set({ method: m.id })} />
+            <span><strong>{m.label}</strong><span class="hint">{m.blurb}</span></span>
+          </label>
+        ))}
+        {!setup && <span class="hint">{s.mode === "poll" ? "The voting method cannot change once the poll is open." : "The voting method is locked once voting starts."}</span>}
+      </fieldset>
       <div class="grid">
-        <div class="field">
-          <label for="votes">Stars per person</label>
-          <input id="votes" type="number" min="1" max="20" value={s.votesPerPerson} disabled={!setup} onChange={num("votesPerPerson")} />
-          {!setup && <span class="hint">Locked once voting starts.</span>}
-        </div>
+        {s.method === "dots" && (
+          <div class="field">
+            <label for="votes">Votes per person</label>
+            <input id="votes" type="number" min="1" max="20" value={s.votesPerPerson} disabled={!setup} onChange={num("votesPerPerson")} />
+            {!setup && <span class="hint">{s.mode === "poll" ? "Locked once the poll is open." : "Locked once voting starts."}</span>}
+          </div>
+        )}
         <fieldset class="field">
           <legend>Results show</legend>
           <label class="inline"><input type="radio" name="named" disabled={s.phase === "revealed"} checked={!s.namedResults} onChange={() => set({ namedResults: false })} /> Anonymous totals</label>
-          <label class="inline"><input type="radio" name="named" disabled={s.phase === "revealed"} checked={s.namedResults} onChange={() => set({ namedResults: true })} /> Who starred what</label>
+          <label class="inline"><input type="radio" name="named" disabled={s.phase === "revealed"} checked={s.namedResults} onChange={() => set({ namedResults: true })} /> Who voted for what</label>
         </fieldset>
-        <div class="field">
-          <label class="inline">
-            <input type="checkbox" checked={s.ideasOpen} onChange={(e) => set({ ideasOpen: (e.target as HTMLInputElement).checked })} />
-            Participants can add their own ideas (before voting starts)
-          </label>
-          <label for="per">Ideas each person can add</label>
-          <input id="per" type="number" min="1" max="20" value={s.ideasPerPerson} onChange={num("ideasPerPerson")} />
-        </div>
-        <div class="field">
-          <label class="inline">
-            <input type="checkbox" checked={s.autoLock} onChange={(e) => set({ autoLock: (e.target as HTMLInputElement).checked })} />
-            Lock voting automatically when time runs out
-          </label>
-          <span class="hint">Off: time runs out and you decide when to lock.</span>
-        </div>
+        {s.mode === "live" && (
+          <div class="field">
+            <label class="inline">
+              <input type="checkbox" checked={s.ideasOpen} onChange={(e) => set({ ideasOpen: (e.target as HTMLInputElement).checked })} />
+              Participants can add their own options (before voting starts)
+            </label>
+            <label for="per">Options each person can add</label>
+            <input id="per" type="number" min="1" max="20" value={s.ideasPerPerson} onChange={num("ideasPerPerson")} />
+          </div>
+        )}
+        {s.mode === "live" && (
+          <div class="field">
+            <label class="inline">
+              <input type="checkbox" checked={s.autoLock} onChange={(e) => set({ autoLock: (e.target as HTMLInputElement).checked })} />
+              Lock voting automatically when time runs out
+            </label>
+            <span class="hint">Off: time runs out and you decide when to lock.</span>
+          </div>
+        )}
+        {s.mode === "poll" && (
+          <div class="field">
+            <label class="inline">
+              <input type="checkbox" checked={s.shareResults} onChange={(e) => set({ shareResults: (e.target as HTMLInputElement).checked })} />
+              Let participants see the results after the poll closes
+            </label>
+            <span class="hint">They only see totals, never who voted for what.</span>
+          </div>
+        )}
       </div>
     </section>
   );
@@ -383,7 +513,7 @@ function DeletePanel({ sid, title, run }: { sid: string; title: string; run: Run
   const remove = () => {
     if (!confirm(`Delete "${title}" for good?
 
-Its ideas, participants and votes are erased, participants lose access, and its links stop working. Download the results first if you need them. This cannot be undone.`)) return;
+Its options, participants and votes are erased, participants lose access, and its links stop working. Download the results first if you need them. This cannot be undone.`)) return;
     run(async () => {
       await api.adminDeleteBoard(sid);
       api.forgetAdminKey(sid);
@@ -392,9 +522,9 @@ Its ideas, participants and votes are erased, participants lose access, and its 
   };
   return (
     <section class="panel danger-zone" aria-labelledby="h-delete">
-      <h2 id="h-delete">Delete this board</h2>
-      <p class="hint">Removes the board, its ideas, participants and votes. Boards are also deleted automatically after 90 days without use.</p>
-      <button class="danger" onClick={remove}>Delete this board</button>
+      <h2 id="h-delete">Delete this poll</h2>
+      <p class="hint">Removes the poll, its options, participants and votes. Polls are also deleted automatically after 90 days without use.</p>
+      <button class="danger" onClick={remove}>Delete this poll</button>
     </section>
   );
 }

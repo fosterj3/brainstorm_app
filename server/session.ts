@@ -1,12 +1,19 @@
 import { DEFAULT_IDEAS_PER_PERSON, DEFAULT_VOTES_PER_PERSON, type DB } from "./db";
 import { VoteError } from "./errors";
 
-/** setup: collecting ideas. voting: stars open. locked: stars closed. revealed: facilitator is showing results. */
+/** setup: collecting options. voting: votes open. locked: votes closed. revealed: the organizer is showing results. */
 export type Phase = "setup" | "voting" | "locked" | "revealed";
+/** How people vote: dots (spend a fixed number of votes), rank order, a score from 1 to 5, or a split of 100 points. */
+export type Method = "dots" | "rank" | "score" | "points";
+export const METHODS: readonly Method[] = ["dots", "rank", "score", "points"];
+/** live: the organizer runs a timed session. poll: people vote any time before a stored deadline. */
+export type Mode = "live" | "poll";
+export const MODES: readonly Mode[] = ["live", "poll"];
+
 export type TimerState = "stopped" | "running" | "paused" | "ended";
 
 export interface Timer {
-  /** Length chosen by the facilitator; null means no timer. */
+  /** Length chosen by the organizer; null means no timer. */
   durationSec: number | null;
   state: TimerState;
   /** Epoch ms the timer ends; only set while running. */
@@ -16,10 +23,16 @@ export interface Timer {
 }
 
 export interface Settings {
+  method: Method;
+  mode: Mode;
+  /** Epoch ms when an open poll closes by itself, or null for no deadline. Stored, so it survives restarts. */
+  deadline: number | null;
+  /** Open polls: participants may see the anonymous results after the poll closes. Off by default. */
+  shareResults: boolean;
   votesPerPerson: number;
-  /** Whether participants may suggest ideas (only possible during setup). */
+  /** Whether participants may suggest options (only possible during setup). */
   ideasOpen: boolean;
-  /** Max ideas each participant may suggest. */
+  /** Max options each participant may suggest. */
   ideasPerPerson: number;
   /** Named results (true) or anonymous results (false). Used when results are revealed. */
   namedResults: boolean;
@@ -32,7 +45,7 @@ export interface Settings {
 }
 
 export type SettingKey =
-  | "votes_per_person" | "ideas_open" | "ideas_per_person" | "named_results" | "auto_lock"
+  | "method" | "mode" | "deadline" | "share_results" | "votes_per_person" | "ideas_open" | "ideas_per_person" | "named_results" | "auto_lock"
   | "restored" | "phase" | "timer_duration_sec" | "timer_state" | "timer_ends_at" | "timer_remaining_ms";
 
 export const MAX_TIMER_SEC = 4 * 60 * 60;
@@ -60,6 +73,10 @@ export function getSettings(db: DB, sid: string): Settings {
     remainingMs: state === "paused" ? num("timer_remaining_ms") : null,
   };
   return {
+    method: METHODS.find((m) => m === raw.get("method")) ?? "dots",
+    mode: MODES.find((m) => m === raw.get("mode")) ?? "live",
+    deadline: num("deadline") > 0 ? num("deadline") : null,
+    shareResults: raw.get("share_results") === "1",
     votesPerPerson: posInt("votes_per_person", DEFAULT_VOTES_PER_PERSON),
     ideasOpen: raw.get("ideas_open") !== "0",
     ideasPerPerson: posInt("ideas_per_person", DEFAULT_IDEAS_PER_PERSON),
@@ -80,15 +97,24 @@ function writeTimer(db: DB, sid: string, t: { state: TimerState; endsAt?: number
 
 /**
  * Apply anything that has become true because time passed: a running timer that reached zero is marked
- * ended, and voting locks if the facilitator chose auto-lock. Returns true if something changed.
+ * ended, and voting locks if the organizer chose auto-lock. Returns true if something changed.
  */
 export function reconcile(db: DB, sid: string, now: number): boolean {
   return db.transaction(() => {
     const s = getSettings(db, sid);
-    if (s.timer.state !== "running" || s.timer.endsAt === null || now < s.timer.endsAt) return false;
-    writeTimer(db, sid, { state: "ended" });
-    if (s.autoLock && s.phase === "voting") setSetting(db, sid, "phase", "locked");
-    return true;
+    let changed = false;
+    if (s.timer.state === "running" && s.timer.endsAt !== null && now >= s.timer.endsAt) {
+      writeTimer(db, sid, { state: "ended" });
+      if (s.autoLock && s.phase === "voting") setSetting(db, sid, "phase", "locked");
+      changed = true;
+    }
+    // An open poll closes itself at its stored deadline and shows its results to the organizer. This reads the stored
+    // time on every request, never an in-memory timer, so it holds across restarts and sleeping servers.
+    if (s.mode === "poll" && s.phase === "voting" && s.deadline !== null && now >= s.deadline) {
+      setSetting(db, sid, "phase", "revealed");
+      changed = true;
+    }
+    return changed;
   })();
 }
 
@@ -104,10 +130,21 @@ const checkSeconds = (seconds: unknown): number => {
   return Math.round(n);
 };
 
-export type Action = "start" | "pause" | "resume" | "extend" | "lock" | "reopen" | "reveal" | "hide";
+export type Action = "start" | "pause" | "resume" | "extend" | "lock" | "reopen" | "reveal" | "hide" | "close";
 
-/** Facilitator controls. Every transition is validated against the current phase and timer. */
-export function applyAction(db: DB, sid: string, action: Action, now: number, seconds?: number) {
+/** Organizer controls. Every transition is validated against the current phase and timer. */
+/** The longest an open poll can stay open, so a forgotten poll cannot sit open for years. */
+export const MAX_DEADLINE_MS = 365 * 24 * 60 * 60 * 1000;
+
+/** A deadline must be a real time in the future and not absurdly far away. */
+export function checkDeadline(value: unknown, now: number): number {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n <= now) throw new VoteError("bad_input", "Choose a closing time in the future.");
+  if (n > now + MAX_DEADLINE_MS) throw new VoteError("bad_input", "A poll can stay open for at most a year.");
+  return n;
+}
+
+export function applyAction(db: DB, sid: string, action: Action, now: number, seconds?: number, extra: { deadline?: number | null } = {}) {
   db.transaction(() => {
     reconcile(db, sid, now);
     const s = getSettings(db, sid);
@@ -147,7 +184,22 @@ export function applyAction(db: DB, sid: string, action: Action, now: number, se
         writeTimer(db, sid, { state: timer.state === "running" || timer.state === "paused" ? "stopped" : timer.state });
         return;
       }
+      case "close": {
+        // Open polls: end voting now and show the results to the organizer.
+        need(s.mode === "poll", "Only open polls can be closed this way. Use lock and reveal in a live session.");
+        need(s.phase === "voting", "This poll is not open.");
+        setSetting(db, sid, "phase", "revealed");
+        return;
+      }
       case "reopen": {
+        if (s.mode === "poll") {
+          need(s.phase === "revealed" || s.phase === "locked", "This poll is still open.");
+          // A reopened poll needs a closing time in the future, or none. An old deadline would close it again at once.
+          if (extra.deadline !== undefined) setSetting(db, sid, "deadline", extra.deadline === null ? null : checkDeadline(extra.deadline, now));
+          else setSetting(db, sid, "deadline", null);
+          setSetting(db, sid, "phase", "voting");
+          return;
+        }
         need(s.phase === "locked", "Voting is not locked.");
         setSetting(db, sid, "phase", "voting");
         writeTimer(db, sid, { state: "stopped" });
@@ -168,6 +220,8 @@ export function applyAction(db: DB, sid: string, action: Action, now: number, se
 }
 
 export interface SettingsPatch {
+  /** How people vote. Only while setting up. */
+  method?: Method;
   votesPerPerson?: number;
   ideasPerPerson?: number;
   ideasOpen?: boolean;
@@ -175,6 +229,10 @@ export interface SettingsPatch {
   autoLock?: boolean;
   /** Seconds, or null for no timer. Only while setting up. */
   timerSeconds?: number | null;
+  /** Open polls: when the poll closes by itself (epoch ms), or null for no deadline. */
+  deadline?: number | null;
+  /** Open polls: let participants see the (anonymous) results once the poll has closed. */
+  shareResults?: boolean;
 }
 
 const intIn = (v: unknown, min: number, max: number, label: string) => {
@@ -183,9 +241,24 @@ const intIn = (v: unknown, min: number, max: number, label: string) => {
   return n;
 };
 
-export function updateSettings(db: DB, sid: string, patch: SettingsPatch) {
+export function updateSettings(db: DB, sid: string, patch: SettingsPatch, now = Date.now()) {
   db.transaction(() => {
     const s = getSettings(db, sid);
+    if (patch.deadline !== undefined) {
+      need(s.mode === "poll", "Only open polls have a closing time.");
+      need(s.phase === "voting", "Reopen the poll before changing its closing time.");
+      setSetting(db, sid, "deadline", patch.deadline === null ? null : checkDeadline(patch.deadline, now));
+    }
+    if (patch.shareResults !== undefined) {
+      need(s.mode === "poll", "Sharing results with participants is only for open polls.");
+      setSetting(db, sid, "share_results", patch.shareResults === true);
+    }
+    if (patch.method !== undefined) {
+      need(s.phase === "setup", "The voting method can only change before voting starts.");
+      const method = METHODS.find((m) => m === patch.method);
+      if (!method) throw new VoteError("bad_input", "Choose a voting method from the list.");
+      setSetting(db, sid, "method", method);
+    }
     if (patch.votesPerPerson !== undefined) {
       need(s.phase === "setup", "Votes per person can only change before voting starts.");
       setSetting(db, sid, "votes_per_person", intIn(patch.votesPerPerson, 1, 20, "Votes per person"));
@@ -195,7 +268,7 @@ export function updateSettings(db: DB, sid: string, patch: SettingsPatch) {
       setSetting(db, sid, "timer_duration_sec", patch.timerSeconds === null ? null : checkSeconds(patch.timerSeconds));
     }
     if (patch.namedResults !== undefined) need(s.phase !== "revealed", "Hide the results before changing who they show.");
-    if (patch.ideasPerPerson !== undefined) setSetting(db, sid, "ideas_per_person", intIn(patch.ideasPerPerson, 1, 20, "Ideas per person"));
+    if (patch.ideasPerPerson !== undefined) setSetting(db, sid, "ideas_per_person", intIn(patch.ideasPerPerson, 1, 20, "Options per person"));
     if (patch.ideasOpen !== undefined) setSetting(db, sid, "ideas_open", patch.ideasOpen === true);
     if (patch.namedResults !== undefined) setSetting(db, sid, "named_results", patch.namedResults === true);
     if (patch.autoLock !== undefined) setSetting(db, sid, "auto_lock", patch.autoLock === true);

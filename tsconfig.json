@@ -10,7 +10,8 @@
     "types": ["node", "vite/client"],
     "skipLibCheck": true,
     "noEmit": true,
+    "allowImportingTsExtensions": true,
     "esModuleInterop": true
   },
-  "include": ["server", "client", "vite.config.ts"]
+  "include": ["server", "client", "shared", "scripts", "vite.config.ts"]
 }

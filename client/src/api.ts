@@ -31,7 +31,15 @@ export interface Timer {
   endsAt: number | null;
   remainingMs: number | null;
 }
+export type Method = "dots" | "rank" | "score" | "points";
+export type Mode = "live" | "poll";
 export interface Settings {
+  method: Method;
+  mode: Mode;
+  /** When an open poll closes by itself (epoch ms), or null. */
+  deadline: number | null;
+  /** Open polls: participants may see the anonymous results once it has closed. */
+  shareResults: boolean;
   votesPerPerson: number;
   ideasOpen: boolean;
   ideasPerPerson: number;
@@ -42,13 +50,21 @@ export interface Settings {
   revealed: boolean;
   timer: Timer;
 }
+/** What each voting method allows. ankSlots is how many options a person ranks. */
+export interface Limits {
+  rankSlots: number;
+  scoreMax: number;
+  pointsTotal: number;
+}
 export interface Board {
   serverNow: number;
   board: BoardMeta;
   settings: Settings;
   columns: Column[];
   ideas: Idea[];
-  me: { name: string; votes: number[]; ideasAdded: number; submitted: boolean } | null;
+  limits: Limits;
+  /** ballot maps option id to value: 1 per dot, or a rank, score or points. Only this person's own. */
+  me: { name: string; votes: number[]; ballot: Record<number, number>; ideasAdded: number; submitted: boolean } | null;
 }
 export interface Counts {
   joined: number;
@@ -63,23 +79,30 @@ export interface FacilitatorState {
   settings: Settings;
   columns: Column[];
   ideas: FacilitatorIdea[];
+  limits: Limits;
   counts: Counts;
 }
 
 export interface ResultRow {
   id: number;
   column: string;
+  /** False for options that are not in a named group. */
+  grouped: boolean;
   columnId: number;
   code: string;
   audience: string;
   title: string;
   summary: string;
+  /** Votes, points, Borda points or average score, depending on the poll's method. */
   stars: number;
+  /** How many people gave this option something. For score polls, the number of ratings. */
+  ratings: number;
   rank: number;
   tied: boolean;
   voters?: string[];
 }
 export interface Results {
+  method: Method;
   named: boolean;
   restored: boolean;
   totals: { joined: number; submitted: number; voted: number; stars: number };
@@ -88,7 +111,7 @@ export interface Results {
 
 export type Push =
   | { type: "ideas"; ideas: Idea[] }
-  | { type: "votes"; votes: number[] }
+  | { type: "votes"; votes: number[]; ballot?: Record<number, number> }
   | { type: "refresh" }
   | { type: "deleted" }
   | { type: "nudge" }
@@ -102,7 +125,9 @@ export class ApiError extends Error {
 
 // ---- what this browser remembers -----------------------------------------------------------
 
-const tokenKey = (sid: string) => `brainstorm.token.${sid}`;
+// Storage keys keep the old "brainstorm." prefix on purpose: renaming them would lock people out of the
+// organizer links and joined sessions already saved in their browsers.
+const tokenKey =(sid: string) => `brainstorm.token.${sid}`;
 const adminKey = (sid: string) => `brainstorm.admin.${sid}`;
 const BOARDS_KEY = "brainstorm.boards";
 
@@ -111,7 +136,7 @@ export const getAdminKey = (sid: string) => localStorage.getItem(adminKey(sid)) 
 export const setAdminKey = (sid: string, key: string) => localStorage.setItem(adminKey(sid), key);
 export const forgetAdminKey = (sid: string) => localStorage.removeItem(adminKey(sid));
 
-/** Boards this browser can facilitate (keys live in localStorage on this device only). */
+/** Polls this browser can organize (keys live in localStorage on this device only). */
 export function myBoards(): { id: string; title: string }[] {
   try {
     const list = JSON.parse(localStorage.getItem(BOARDS_KEY) ?? "[]") as { id: string; title: string }[];
@@ -125,7 +150,7 @@ export function rememberBoard(id: string, title: string) {
   localStorage.setItem(BOARDS_KEY, JSON.stringify([{ id, title }, ...rest].slice(0, 30)));
 }
 
-/** Sessions this browser has joined as a participant, so people can find their way back. */
+/** Polls this browser has joined as a participant, so people can find their way back. */
 const JOINED_KEY = "brainstorm.joined";
 export function joinedSessions(): { id: string; title: string }[] {
   try {
@@ -139,12 +164,14 @@ export function rememberJoined(id: string, title: string) {
   const rest = joinedSessions().filter((b) => b.id !== id);
   localStorage.setItem(JOINED_KEY, JSON.stringify([{ id, title }, ...rest].slice(0, 30)));
 }
-/** Forget a session on this device only. Nothing is deleted from the server. */
+/** Forget a poll on this device only. Nothing is deleted from the server. */
 export function forgetJoined(id: string) {
   localStorage.removeItem(tokenKey(id));
 }
 
 export interface BoardSummary {
+  mode: Mode;
+  deadline: number | null;
   id: string;
   title: string;
   phase: Phase;
@@ -218,9 +245,20 @@ export function connectLive(
 
 // ---- public --------------------------------------------------------------------------------
 
-export const createBoard = (input: { title: string; subtitle: string; template: "blank" | "example" }) =>
-  call<{ id: string; adminKey: string }>("POST", "/api/sessions", {}, input);
-/** Rebuild a board from a results CSV downloaded earlier. The new board opens with the results showing. */
+/** Everything the create screen sends. Anything left out takes its usual default on the server. */
+export interface CreatePayload {
+  title: string;
+  subtitle?: string;
+  method?: Method;
+  mode?: Mode;
+  /** Open polls: when it closes (epoch ms). Leave out for no deadline. */
+  deadline?: number;
+  options?: { title: string; summary?: string; details?: string; group?: string; tag?: string; code?: string }[];
+  groups?: { name: string; description?: string; color?: string }[];
+  settings?: { votesPerPerson?: number; namedResults?: boolean; ideasOpen?: boolean; shareResults?: boolean };
+}
+export const createBoard = (input: CreatePayload) => call<{ id: string; adminKey: string }>("POST", "/api/sessions", {}, input);
+/** Rebuild a poll from a results CSV downloaded earlier. The new poll opens with the results showing. */
 export const restoreResults = (title: string, csv: string) =>
   call<{ id: string; adminKey: string; ideas: number; skipped: number; named: boolean }>("POST", "/api/sessions/restore", {}, { title, csv });
 export const boardExists = (sid: string) => call<{ title: string }>("GET", `/api/s/${encodeURIComponent(sid)}/exists`, {});
@@ -236,12 +274,17 @@ export async function join(sid: string, name: string) {
 }
 export const setVote = (sid: string, ideaId: number, starred: boolean) =>
   call<{ votes: number[] }>("PUT", `/api/s/${sid}/votes/${ideaId}`, pHeaders(sid), { starred });
+/** Rank, score and points polls: send the whole ballot (option id to value). An empty ballot clears it. */
+export const setBallot = (sid: string, values: Record<number, number>) =>
+  call<{ votes: number[]; ballot: Record<number, number>; submitted: boolean }>("PUT", `/api/s/${sid}/ballot`, pHeaders(sid), { values });
+/** Open polls the organizer chose to share: the anonymous results once the poll has closed. */
+export const fetchSharedResults = (sid: string) => call<Results>("GET", `/api/s/${sid}/results`, pHeaders(sid));
 export const setSubmitted = (sid: string, submitted: boolean) =>
   call<{ submitted: boolean }>("PUT", `/api/s/${sid}/submitted`, pHeaders(sid), { submitted });
 export const suggestIdea = (sid: string, idea: { title: string; summary: string }) =>
   call<{ idea: Idea }>("POST", `/api/s/${sid}/ideas`, pHeaders(sid), idea);
 
-// ---- facilitator ---------------------------------------------------------------------------
+// ---- organizer ---------------------------------------------------------------------------
 
 const aHeaders = (sid: string) => ({ "x-admin-key": getAdminKey(sid) });
 const A = (sid: string, path: string) => `/api/s/${sid}/admin/${path}`;
@@ -256,8 +299,9 @@ export const adminState = (sid: string) => call<FacilitatorState>("GET", A(sid, 
 export const adminBoard = (sid: string, patch: Partial<Pick<BoardMeta, "title" | "subtitle" | "bg">>) =>
   call<{ ok: true }>("PUT", A(sid, "board"), aHeaders(sid), patch);
 export const adminSettings = (sid: string, patch: Record<string, unknown>) => call<{ ok: true }>("PUT", A(sid, "settings"), aHeaders(sid), patch);
-export const adminAction = (sid: string, action: string, seconds?: number) =>
-  call<{ ok: true }>("POST", A(sid, "action"), aHeaders(sid), { action, seconds });
+/** `extra.deadline` (epoch ms or null) is used when reopening an open poll. */
+export const adminAction = (sid: string, action: string, seconds?: number, extra?: { deadline?: number | null }) =>
+  call<{ ok: true }>("POST", A(sid, "action"), aHeaders(sid), { action, seconds, ...extra });
 export const adminAddColumn = (sid: string, c: ColumnInput) => call<{ column: Column }>("POST", A(sid, "columns"), aHeaders(sid), c);
 export const adminEditColumn = (sid: string, id: number, c: ColumnInput) => call<{ column: Column }>("PUT", A(sid, `columns/${id}`), aHeaders(sid), c);
 export const adminDeleteColumn = (sid: string, id: number) => call<{ ok: true }>("DELETE", A(sid, `columns/${id}`), aHeaders(sid));
@@ -272,7 +316,7 @@ export const adminImport = (sid: string, format: "csv" | "json", content: string
 export const adminExport = (sid: string) => call<unknown>("GET", A(sid, "export"), aHeaders(sid));
 export const adminResults = (sid: string) => call<Results>("GET", A(sid, "results"), aHeaders(sid));
 
-/** Download the results as a CSV file (the server builds it, so formulas in idea titles are neutralised). */
+/** Download the results as a CSV file (the server builds it, so formulas in option titles are neutralised). */
 export async function downloadResultsCsv(sid: string, title: string) {
   const res = await fetch(A(sid, "results.csv"), { headers: aHeaders(sid) });
   if (!res.ok) {
@@ -282,7 +326,7 @@ export async function downloadResultsCsv(sid: string, title: string) {
   const url = URL.createObjectURL(await res.blob());
   const a = document.createElement("a");
   a.href = url;
-  a.download = `${title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "session"}-results.csv`;
+  a.download = `${title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "poll"}-results.csv`;
   a.click();
   URL.revokeObjectURL(url);
 }

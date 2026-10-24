@@ -59,7 +59,7 @@ describe("board look", () => {
   it("starts new boards on the cream background", () => {
     const db = openDb(":memory:");
     const { id } = createSession(db, { title: "A" }, 0);
-    expect(getBoardMeta(db, id)!.bg).toBe("#f5f3ed");
+    expect(getBoardMeta(db, id)!.bg).toBe("#fbfafc");
   });
   it("updates title, subtitle and background, validating the color", () => {
     const db = openDb(":memory:");

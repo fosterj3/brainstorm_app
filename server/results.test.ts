@@ -76,7 +76,7 @@ describe("tallying", () => {
     vote(1, idea.id);
     reveal();
     const row = getResults(db, sid).rows[0];
-    expect([row.title, row.column, row.stars]).toEqual(["Suggested", "Ideas from the group", 1]);
+    expect([row.title, row.column, row.stars]).toEqual(["Suggested", "Other options", 1]);
   });
   it("tallies each session separately", () => {
     const other = newBoard(2);
@@ -158,7 +158,7 @@ describe("CSV export", () => {
     vote(0, 1);
     reveal();
     const csv = resultsToCsv(getResults(db, sid));
-    expect(csv.startsWith("﻿Rank,Tied,Code,Idea,Column,Audience,Stars")).toBe(true);
+    expect(csv.startsWith("﻿Rank,Tied,Code,Option,Group,Tag,Votes")).toBe(true);
     expect(csv.trim().split("\r\n")).toHaveLength(1 + 6);
   });
   it("quotes commas and quotes", () => {
@@ -179,5 +179,20 @@ describe("CSV export", () => {
     expect(lines.join("\n")).toContain("'=HYPERLINK");
     expect(lines.join("\n")).toContain("'+1+1");
     expect(lines.join("\n")).toContain("'@SUM");
+  });
+});
+
+describe("ungrouped options in results", () => {
+  it("flags ungrouped rows and leaves their Group blank in the CSV", () => {
+    setSetting(db, sid, "phase", "setup");
+    addIdea(db, sid, people[0], { title: "Loose" });
+    setSetting(db, sid, "phase", "voting");
+    reveal();
+    const results = getResults(db, sid);
+    const row = results.rows.find((r) => r.title === "Loose")!;
+    expect(row.grouped).toBe(false);
+    expect(results.rows.filter((r) => r.grouped).length).toBe(results.rows.length - 1);
+    const line = resultsToCsv(results).split("\r\n").find((l) => l.includes("Loose"))!;
+    expect(line.split(",").slice(3, 6)).toEqual(["Loose", "", ""]);
   });
 });

@@ -12,6 +12,7 @@ export const SWATCHES: { name: string; value: string }[] = [
 ];
 
 export const BACKGROUNDS: { name: string; value: string }[] = [
+  { name: "Ority", value: "#fbfafc" },
   { name: "Cream", value: "#f5f3ed" },
   { name: "Soft gray", value: "#f4f5f7" },
   { name: "Warm", value: "#fbf6ee" },

@@ -84,10 +84,10 @@ describe("restoring results from a downloaded CSV", () => {
     expect(rows.map((r) => [r.title, r.rank])).toEqual([["High", 1], ["Mid", 2], ["Low", 3]]);
   });
 
-  it("accepts a hand-made file with just Idea and Stars", () => {
+  it("accepts a hand-made file with just Idea and Stars, putting options in the ungrouped section", () => {
     const { db, id } = openDbWith("Idea,Stars\nAlpha,4\nBeta,1\n");
     const r = getResults(db, id);
-    expect(r.rows.map((x) => [x.title, x.stars, x.column])).toEqual([["Alpha", 4, "General"], ["Beta", 1, "General"]]);
+    expect(r.rows.map((x) => [x.title, x.stars, x.column])).toEqual([["Alpha", 4, "Other options"], ["Beta", 1, "Other options"]]);
   });
 
   it("can be continued: reopening voting adds new stars on top of the restored ones", () => {
@@ -159,5 +159,21 @@ describe("rejecting files that are not results", () => {
   });
   it("is not affected by createSession being unused here", () => {
     expect(createSession(openDb(":memory:"), { title: "x" }).id).toHaveLength(8);
+  });
+});
+
+describe("restoring from the newer CSV headers", () => {
+  it("reads Option, Group, Tag, Votes and Voted by, and leaves a blank group ungrouped", () => {
+    const { db, id } = openDbWith("Rank,Tied,Code,Option,Group,Tag,Votes,Voted by\n1,,A1,Alpha,Team,For all,4,Ann; Ben\n2,,,Beta,,,1,\n");
+    const r = getResults(db, id);
+    expect(r.named).toBe(true);
+    expect(r.rows.map((x) => [x.title, x.stars, x.column, x.audience, x.voters])).toEqual([
+      ["Alpha", 4, "Team", "For all", ["Ann", "Ben"]],
+      ["Beta", 1, "Other options", "", []],
+    ]);
+  });
+  it("still reads CSVs downloaded before the rename", () => {
+    const { db, id } = openDbWith("Rank,Tied,Code,Idea,Column,Audience,Stars,Starred by\n1,,A1,Alpha,Team,For all,4,Ann\n");
+    expect(getResults(db, id).rows[0]).toMatchObject({ title: "Alpha", stars: 4, column: "Team", audience: "For all", voters: ["Ann"] });
   });
 });

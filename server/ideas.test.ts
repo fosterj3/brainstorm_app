@@ -27,10 +27,10 @@ const code = (fn: () => unknown) => {
 };
 
 describe("columns", () => {
-  it("creates a group column with every session, always listed last", () => {
+  it("creates an ungrouped section with every poll, always listed last", () => {
     createColumn(db, sid, { name: "Beta" });
     const cols = listColumns(db, sid);
-    expect(cols.map((c) => c.name)).toEqual(["Alpha", "Beta", "Ideas from the group"]);
+    expect(cols.map((c) => c.name)).toEqual(["Alpha", "Beta", "Other options"]);
     expect(cols.at(-1)!.kind).toBe("group");
   });
   it("gives new columns distinct default colors and accepts custom ones", () => {
@@ -45,7 +45,7 @@ describe("columns", () => {
     updateColumn(db, sid, b.id, { name: "Beta 2", color: "#abcdef", description: "d" });
     expect(listColumns(db, sid).find((c) => c.id === b.id)).toMatchObject({ name: "Beta 2", color: "#abcdef", description: "d" });
     moveColumn(db, sid, b.id, "left");
-    expect(listColumns(db, sid).map((c) => c.name)).toEqual(["Beta 2", "Alpha", "Ideas from the group"]);
+    expect(listColumns(db, sid).map((c) => c.name)).toEqual(["Beta 2", "Alpha", "Other options"]);
     moveColumn(db, sid, b.id, "left"); // already first: no-op
     expect(listColumns(db, sid)[0].name).toBe("Beta 2");
   });
@@ -67,9 +67,9 @@ describe("columns", () => {
 });
 
 describe("ideas", () => {
-  it("auto-assigns short codes from the column name", () => {
+  it("does not invent codes, but keeps any code the organizer types", () => {
     const [a, b] = [createIdea(db, sid, { columnId: colId, title: "A" }), createIdea(db, sid, { columnId: colId, title: "B" })];
-    expect([a.code, b.code]).toEqual(["A1", "A2"]);
+    expect([a.code, b.code]).toEqual(["", ""]);
     expect(createIdea(db, sid, { columnId: colId, title: "C", code: "X9" }).code).toBe("X9");
   });
   it("stores summary, details and audience, and edits or moves them", () => {
@@ -170,9 +170,11 @@ describe("CSV and JSON parsing", () => {
 describe("import and export", () => {
   it("creates missing columns, matches existing ones case-insensitively, skips blank titles", () => {
     const r = importBoard(db, sid, parseIdeas("csv", "column,title,summary\nalpha,One,\nBeta,Two,\nBETA,Three,\n,Four,\nBeta,,no title\n"), "append");
-    expect(r).toEqual({ added: 4, skipped: 1, columnsAdded: 2 }); // Beta and General
+    expect(r).toEqual({ added: 4, skipped: 1, columnsAdded: 1 }); // only Beta is new; the blank group row is ungrouped
     const names = listColumns(db, sid).map((c) => c.name);
-    expect(names).toEqual(["Alpha", "Beta", "General", "Ideas from the group"]);
+    expect(names).toEqual(["Alpha", "Beta", "Other options"]);
+    const ungrouped = listColumns(db, sid).find((c) => c.kind === "group")!;
+    expect(listIdeas(db, sid).find((i) => i.title === "Four")!.columnId).toBe(ungrouped.id);
     expect(listIdeas(db, sid).find((i) => i.title === "One")!.columnId).toBe(colId);
   });
   it("imports declared columns with their colors and descriptions", () => {
@@ -183,7 +185,7 @@ describe("import and export", () => {
     createIdea(db, sid, { columnId: colId, title: "Old" });
     importBoard(db, sid, parseIdeas("json", '[{"title":"New","theme":"Fresh"}]'), "replace");
     expect(listIdeas(db, sid).map((i) => i.title)).toEqual(["New"]);
-    expect(listColumns(db, sid).map((c) => c.name)).toEqual(["Fresh", "Ideas from the group"]);
+    expect(listColumns(db, sid).map((c) => c.name)).toEqual(["Fresh", "Other options"]);
     setSetting(db, sid, "phase", "voting");
     expect(code(() => importBoard(db, sid, parseIdeas("json", '[{"title":"X"}]'), "replace"))).toBe("bad_state");
   });
@@ -191,7 +193,7 @@ describe("import and export", () => {
     const ideas = Array.from({ length: 301 }, (_, i) => ({ title: `I${i}` }));
     expect(code(() => importBoard(db, sid, { columns: [], ideas }, "append"))).toBe("bad_input");
     expect(listIdeas(db, sid)).toHaveLength(0);
-    expect(listColumns(db, sid).map((c) => c.name)).toEqual(["Alpha", "Ideas from the group"]);
+    expect(listColumns(db, sid).map((c) => c.name)).toEqual(["Alpha", "Other options"]);
   });
   it("round-trips through export, without any votes or people", () => {
     createIdea(db, sid, { columnId: colId, title: "A", summary: "s", details: "d", audience: "For all" });
@@ -203,5 +205,29 @@ describe("import and export", () => {
     const fresh = newBoard(0);
     importBoard(fresh.db, fresh.sid, parseIdeas("json", JSON.stringify(out)), "replace");
     expect(exportBoard(fresh.db, fresh.sid)).toEqual(out);
+  });
+});
+
+describe("groups are optional", () => {
+  it("accepts the newer header and key names for options, groups and tags", () => {
+    const csv = parseIdeas("csv", "Option,Group,Tag\nMentoring,People,For managers\n");
+    expect(csv.ideas).toEqual([{ column: "People", title: "Mentoring", summary: "", details: "", audience: "For managers", code: "" }]);
+    const json = parseIdeas("json", '{"groups":[{"name":"X"}],"options":[{"title":"A","group":"X","tag":"t"},"B"]}');
+    expect(json.columns).toHaveLength(1);
+    expect(json.ideas[0]).toMatchObject({ title: "A", column: "X", audience: "t" });
+    expect(json.ideas).toHaveLength(2);
+  });
+  it("puts options without a group in the ungrouped section and lets a poll have no groups at all", () => {
+    const f = newBoard(5);
+    deleteColumn(f.db, f.sid, listColumns(f.db, f.sid).find((c) => c.kind === "normal")!.id);
+    importBoard(f.db, f.sid, parseIdeas("json", '["One","Two"]'), "append");
+    const cols = listColumns(f.db, f.sid);
+    expect(cols.map((c) => c.kind)).toEqual(["group"]);
+    expect(listIdeas(f.db, f.sid).map((i) => i.columnId)).toEqual([cols[0].id, cols[0].id]);
+  });
+  it("exports ungrouped organizer options, with a blank group", () => {
+    const ungrouped = listColumns(db, sid).find((c) => c.kind === "group")!;
+    createIdea(db, sid, { columnId: ungrouped.id, title: "Loose" });
+    expect(exportBoard(db, sid).ideas).toEqual([expect.objectContaining({ title: "Loose", column: "" })]);
   });
 });

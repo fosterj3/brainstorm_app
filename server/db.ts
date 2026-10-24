@@ -1,18 +1,26 @@
-import Database from "better-sqlite3";
 import fs from "node:fs";
-import path from "node:path";
+import { openStorage, type Storage } from "./storage";
 
-export type DB = Database.Database;
+/** The database, as the rest of the server sees it. See storage.ts for what that promises. */
+export type DB = Storage;
 
-// Initial values only. Each is a facilitator setting stored per session.
+/**
+ * Where the database lives. DB_PATH wins. Otherwise use data/ority.db, but keep using data/brainstorm.db
+ * when that older file exists and the new one does not, so renaming the product never orphans boards.
+ */
+export function defaultDbPath(env: string | undefined, exists: (p: string) => boolean = fs.existsSync): string {
+  if (env) return env;
+  if (!exists("data/ority.db") && exists("data/brainstorm.db")) return "data/brainstorm.db";
+  return "data/ority.db";
+}
+
+// Initial values only. Each is an organizer setting stored per session.
 export const DEFAULT_VOTES_PER_PERSON = 3;
 export const DEFAULT_IDEAS_PER_PERSON = 3;
 
-export function openDb(file: string): DB {
-  if (file !== ":memory:") fs.mkdirSync(path.dirname(file), { recursive: true });
-  const db = new Database(file);
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
+/** Open the database and bring its tables up to date. `kind` picks the storage adapter (see storage.ts). */
+export function openDb(file: string, kind = "sqlite"): DB {
+  const db = openStorage({ kind, file });
 
   // The single-session schema (phases 1-3) had no sessions table. It only ever held development data,
   // so it is replaced rather than migrated.
@@ -26,7 +34,7 @@ export function openDb(file: string): DB {
       admin_hash TEXT NOT NULL,
       title TEXT NOT NULL,
       subtitle TEXT NOT NULL DEFAULT '',
-      bg TEXT NOT NULL DEFAULT '#f5f3ed',
+      bg TEXT NOT NULL DEFAULT '#fbfafc',
       created_at INTEGER NOT NULL,
       last_active INTEGER NOT NULL
     );
@@ -69,6 +77,7 @@ export function openDb(file: string): DB {
     CREATE TABLE IF NOT EXISTS votes (
       token TEXT NOT NULL REFERENCES participants(token) ON DELETE CASCADE,
       idea_id INTEGER NOT NULL REFERENCES ideas(id) ON DELETE CASCADE,
+      value INTEGER NOT NULL DEFAULT 1,
       PRIMARY KEY (token, idea_id)
     );
     CREATE INDEX IF NOT EXISTS ideas_session ON ideas(session_id);
@@ -80,5 +89,9 @@ export function openDb(file: string): DB {
   if (!icols.some((c) => c.name === "restored_stars")) {
     db.exec("ALTER TABLE ideas ADD COLUMN restored_stars INTEGER NOT NULL DEFAULT 0; ALTER TABLE ideas ADD COLUMN restored_voters TEXT;");
   }
+  // `value` is what a vote is worth: 1 for a dot, or a rank, score or points depending on the voting method.
+  // Rows made before it existed are all dot votes, so they take the default of 1.
+  const vcols = db.prepare("PRAGMA table_info(votes)").all() as { name: string }[];
+  if (!vcols.some((c) => c.name === "value")) db.exec("ALTER TABLE votes ADD COLUMN value INTEGER NOT NULL DEFAULT 1");
   return db;
 }

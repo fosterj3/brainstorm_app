@@ -1,16 +1,16 @@
 # Fly.io config. Change `app` to a unique name, then follow the README.
-app = "brainstorm-app-change-me"
+app = "ority-change-me"
 primary_region = "iad"
 
 [build]
 
 [env]
   PORT = "3000"
-  DB_PATH = "/data/brainstorm.db"
+  DB_PATH = "/data/ority.db"
   TRUST_PROXY = "1"
 
 [[mounts]]
-  source = "brainstorm_data"
+  source = "ority_data"
   destination = "/data"
 
 [http_service]

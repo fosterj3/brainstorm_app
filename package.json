@@ -1,5 +1,5 @@
 {
-  "name": "brainstorm_app",
+  "name": "ority",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -12,7 +12,9 @@
     "build": "vite build",
     "start": "tsx --env-file-if-exists=.env server/index.ts",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "backup": "tsx --env-file-if-exists=.env scripts/backup.ts",
+    "loadtest": "tsx scripts/loadtest.ts"
   },
   "dependencies": {
     "@fastify/static": "^10.1.6",

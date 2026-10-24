@@ -4,10 +4,11 @@ import path from "node:path";
 import type { DB } from "./db";
 import { VoteError } from "./errors";
 import { createGroupColumn, cleanColor, importBoard, parseIdeas } from "./ideas";
+import { checkDeadline, getSettings, MODES, setSetting, updateSettings, type Method } from "./session";
 
 export const MAX_SESSIONS = 5000;
-/** Page background for new boards; the facilitator can change it. */
-export const DEFAULT_BG = "#f5f3ed";
+/** Page background for new polls; the organizer can change it. */
+export const DEFAULT_BG = "#fbfafc";
 const CODE_ALPHABET = "23456789abcdefghjkmnpqrstuvwxyz"; // no look-alike characters
 const hash = (s: string) => createHash("sha256").update(s).digest("hex");
 
@@ -22,15 +23,36 @@ const clip = (v: unknown, max: number) => String(v ?? "").trim().replace(/\s+/g,
 
 /**
  * Create a board. The caller gets the public session code (for the participant link) and a secret admin key
- * (for the facilitator link). Only a hash of the admin key is stored.
+ * (for the organizer link). Only a hash of the admin key is stored.
  */
-export function createSession(
-  db: DB,
-  input: { title?: string; subtitle?: string; template?: string },
-  now = Date.now(),
-): { id: string; adminKey: string } {
+/** Everything a new poll can be created with. Anything left out takes its usual default. */
+export interface CreateInput {
+  title?: unknown;
+  subtitle?: unknown;
+  /** Only "example" (the survey follow-up sample) is understood here. The create screen sends explicit options instead. */
+  template?: unknown;
+  method?: unknown;
+  /** "live" (the default) or "poll". */
+  mode?: unknown;
+  /** Open polls: epoch ms when it closes by itself. Leave out for no deadline. */
+  deadline?: unknown;
+  /** Options as strings or { title, summary, details, group, tag, code }. */
+  options?: unknown;
+  /** Named groups as { name, description, color }. */
+  groups?: unknown;
+  /** votesPerPerson, namedResults, ideasOpen, ideasPerPerson, autoLock, timerSeconds, shareResults. */
+  settings?: unknown;
+}
+
+type Obj = Record<string, unknown>;
+const obj = (v: unknown): Obj => (v && typeof v === "object" && !Array.isArray(v) ? (v as Obj) : {});
+
+export function createSession(db: DB, input: CreateInput, now = Date.now()): { id: string; adminKey: string } {
   const title = clip(input.title, 100);
-  if (!title) throw new VoteError("bad_input", "Please give your session a title.");
+  if (!title) throw new VoteError("bad_input", "Please give your poll a title.");
+  const mode = input.mode === undefined || input.mode === "" ? "live" : MODES.find((m) => m === input.mode);
+  if (!mode) throw new VoteError("bad_input", "Choose whether this is a live session or an open poll.");
+  const settings = obj(input.settings);
   return db.transaction(() => {
     const { n } = db.prepare("SELECT COUNT(*) AS n FROM sessions").get() as { n: number };
     if (n >= MAX_SESSIONS) throw new VoteError("full", "This site is at capacity. Please try again later.");
@@ -48,6 +70,40 @@ export function createSession(
     if (input.template === "example") {
       const file = path.resolve(import.meta.dirname, "../ideas.example.json");
       importBoard(db, id, parseIdeas("json", fs.readFileSync(file, "utf8")), "append");
+    }
+    if (Array.isArray(input.options) || Array.isArray(input.groups)) {
+      const options = Array.isArray(input.options) ? input.options : [];
+      importBoard(db, id, {
+        columns: (Array.isArray(input.groups) ? input.groups : []).map((g) => {
+          const o = obj(g);
+          return { name: o.name, description: o.description, color: o.color };
+        }),
+        ideas: options.map((x) => {
+          if (typeof x === "string") return { title: x };
+          const o = obj(x);
+          return { column: o.group, title: o.title, summary: o.summary, details: o.details, audience: o.tag ?? o.audience, code: o.code };
+        }),
+      }, "append");
+    }
+
+    // These go through the same checks as the organizer's settings screen.
+    updateSettings(db, id, {
+      method: input.method === undefined || input.method === "" ? undefined : (input.method as Method),
+      votesPerPerson: settings.votesPerPerson as number | undefined,
+      namedResults: settings.namedResults as boolean | undefined,
+      ideasPerPerson: settings.ideasPerPerson as number | undefined,
+      autoLock: settings.autoLock as boolean | undefined,
+      ideasOpen: mode === "live" ? (settings.ideasOpen as boolean | undefined) : false,
+      timerSeconds: mode === "live" ? (settings.timerSeconds as number | null | undefined) : undefined,
+    }, now);
+
+    if (mode === "poll") {
+      const { n: count } = db.prepare("SELECT COUNT(*) AS n FROM ideas WHERE session_id = ?").get(id) as { n: number };
+      if (count < 2) throw new VoteError("bad_input", "An open poll needs at least two options.");
+      setSetting(db, id, "mode", "poll");
+      if (settings.shareResults === true) setSetting(db, id, "share_results", true);
+      if (input.deadline !== undefined && input.deadline !== null && input.deadline !== "") setSetting(db, id, "deadline", checkDeadline(input.deadline, now));
+      setSetting(db, id, "phase", "voting"); // an open poll takes votes from the moment it is created
     }
     return { id, adminKey };
   })();
@@ -69,7 +125,7 @@ export function verifyAdmin(db: DB, sid: string, key: string | undefined | null)
 export function updateBoardMeta(db: DB, sid: string, patch: { title?: string; subtitle?: string; bg?: string }) {
   db.transaction(() => {
     const cur = getBoardMeta(db, sid);
-    if (!cur) throw new VoteError("unknown_session", "That session no longer exists.");
+    if (!cur) throw new VoteError("unknown_session", "That poll no longer exists.");
     const title = patch.title === undefined ? cur.title : clip(patch.title, 100);
     if (!title) throw new VoteError("bad_input", "The title cannot be empty.");
     const subtitle = patch.subtitle === undefined ? cur.subtitle : clip(patch.subtitle, 200);
@@ -82,6 +138,9 @@ export interface BoardSummary {
   id: string;
   title: string;
   phase: string;
+  mode: string;
+  /** Epoch ms when an open poll closes, or null. */
+  deadline: number | null;
   ideas: number;
   joined: number;
   submitted: number;
@@ -89,7 +148,7 @@ export interface BoardSummary {
   lastActive: number;
 }
 
-/** A short status line for the facilitator's "my boards" list. Headcounts only. */
+/** A short status line for the organizer's "your polls" list. Headcounts only. */
 export function getSummary(db: DB, sid: string): BoardSummary | null {
   const meta = db.prepare("SELECT id, title, created_at AS createdAt, last_active AS lastActive FROM sessions WHERE id = ?").get(sid) as
     | { id: string; title: string; createdAt: number; lastActive: number }
@@ -97,16 +156,19 @@ export function getSummary(db: DB, sid: string): BoardSummary | null {
   if (!meta) return null;
   const n = (sql: string) => (db.prepare(sql).get(sid) as { n: number }).n;
   const phase = (db.prepare("SELECT value FROM settings WHERE session_id = ? AND key = 'phase'").get(sid) as { value: string } | undefined)?.value ?? "setup";
+  const s = getSettings(db, sid);
   return {
     ...meta,
     phase,
+    mode: s.mode,
+    deadline: s.deadline,
     ideas: n("SELECT COUNT(*) AS n FROM ideas WHERE session_id = ?"),
     joined: n("SELECT COUNT(*) AS n FROM participants WHERE session_id = ?"),
     submitted: n("SELECT COUNT(*) AS n FROM participants WHERE session_id = ? AND submitted = 1"),
   };
 }
 
-/** Permanently delete a board with its columns, ideas, people and votes. */
+/** Permanently delete a poll with its groups, options, people and votes. */
 export function deleteSession(db: DB, sid: string): boolean {
   return db.prepare("DELETE FROM sessions WHERE id = ?").run(sid).changes > 0;
 }
@@ -118,6 +180,11 @@ export function touch(db: DB, sid: string, now = Date.now()) {
 /** Delete sessions nobody has used for a while, with everything in them. Returns how many were removed. */
 export function purgeIdle(db: DB, now: number, maxIdleMs: number): number {
   return db.prepare("DELETE FROM sessions WHERE last_active < ?").run(now - maxIdleMs).changes;
+}
+
+/** Polls with a closing time stored, so their expiry can be re-armed after a restart. */
+export function sessionsWithDeadline(db: DB): string[] {
+  return (db.prepare("SELECT DISTINCT session_id FROM settings WHERE key = 'deadline' AND value != ''").all() as { session_id: string }[]).map((r) => r.session_id);
 }
 
 export function sessionsWithRunningTimer(db: DB): string[] {

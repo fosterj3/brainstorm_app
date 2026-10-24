@@ -1,14 +1,20 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import * as api from "./api";
-import type { Column, ResultRow, Results } from "./api";
+import { Loading } from "./Site";
+import type { Column, Method, Mode, ResultRow, Results } from "./api";
 
 type View = "ranked" | "columns";
 
 const colorOf = (columns: Column[], id: number) => columns.find((c) => c.id === id)?.color ?? "#6b7280";
 
-function Row({ row, max, columns, named }: { row: ResultRow; max: number; columns: Column[]; named: boolean }) {
+/** The unit shown beside a score, by method. */
+const unitFor = (method: Method, value: number) =>
+  method === "score" ? "avg" : method === "points" ? (value === 1 ? "point" : "points") : method === "rank" ? (value === 1 ? "pt" : "pts") : value === 1 ? "vote" : "votes";
+
+function Row({ row, max, columns, named, method }: { row: ResultRow; max: number; columns: Column[]; named: boolean; method: Method }) {
+  const width = method === "score" ? (row.stars / 5) * 100 : max ? (row.stars / max) * 100 : 0;
   return (
-    <li class="result-row" style={{ "--c": colorOf(columns, row.columnId) }}>
+    <li class={`result-row${row.rank === 1 && row.stars > 0 ? " top" : ""}`} style={{ "--c": row.grouped ? colorOf(columns, row.columnId) : "var(--tint-4)" }}>
       <span class="rank" aria-label={`Rank ${row.rank}${row.tied ? ", tied" : ""}`}>{row.rank}</span>
       <div class="result-body">
         <div class="result-title">
@@ -16,36 +22,39 @@ function Row({ row, max, columns, named }: { row: ResultRow; max: number; column
           <strong>{row.title}</strong>
           {row.tied && <span class="tie-badge">Tied</span>}
         </div>
-        <div class="result-sub">{row.column}{row.audience ? ` · ${row.audience}` : ""}</div>
-        <div class="bar-track" aria-hidden="true"><div class="bar-fill" style={{ width: `${max ? (row.stars / max) * 100 : 0}%` }} /></div>
+        {(row.grouped || row.audience) && <div class="result-sub">{[row.grouped ? row.column : "", row.audience].filter(Boolean).join(" · ")}</div>}
+        <div class="bar-track" aria-hidden="true"><div class="bar-fill" style={{ width: `${width}%` }} /></div>
+        {method === "score" && <div class="result-sub">{row.ratings} {row.ratings === 1 ? "rating" : "ratings"}</div>}
         {named && row.voters && row.voters.length > 0 && <div class="voters">{row.voters.join(", ")}</div>}
       </div>
       <span class="stars-count">
         <strong>{row.stars}</strong>
-        <span class="sr-only"> {row.stars === 1 ? "star" : "stars"}</span>
-        <span aria-hidden="true"> ★</span>
+        <span class="unit"> {unitFor(method, row.stars)}</span>
       </span>
     </li>
   );
 }
 
-/** The ranked list, or the same ideas grouped by column. Used on the facilitator screen and in presentation mode. */
+const hasGroups = (columns: Column[]) => columns.some((c) => c.kind === "normal");
+
+/** The ranked list, or the same options grouped. Used on the organizer screen and in presentation mode. */
 export function ResultsView({ results, columns, view }: { results: Results; columns: Column[]; view: View }) {
   const max = Math.max(0, ...results.rows.map((r) => r.stars));
-  if (results.rows.length === 0) return <p class="empty">There are no ideas to rank.</p>;
-  if (view === "ranked") {
-    return <ol class="result-list">{results.rows.map((r) => <Row key={r.id} row={r} max={max} columns={columns} named={results.named} />)}</ol>;
+  if (results.rows.length === 0) return <p class="empty">There are no options to rank.</p>;
+  if (view === "ranked" || !hasGroups(columns)) {
+    return <ol class="result-list">{results.rows.map((r) => <Row key={r.id} row={r} max={max} columns={columns} named={results.named} method={results.method} />)}</ol>;
   }
   return (
     <div class="result-columns">
       {columns.map((col) => {
         const rows = results.rows.filter((r) => r.columnId === col.id);
         if (rows.length === 0) return null;
-        const total = rows.reduce((s, r) => s + r.stars, 0);
+        const total = rows.reduce((s, r) => s + (results.method === "score" ? r.ratings : r.stars), 0);
+        const unit = results.method === "score" ? (total === 1 ? "rating" : "ratings") : unitFor(results.method, total);
         return (
           <section key={col.id} class="result-column" style={{ "--c": col.color }}>
-            <h3><span class="dot" aria-hidden="true" /> {col.name} <span class="meta">{total} {total === 1 ? "star" : "stars"}</span></h3>
-            <ol class="result-list">{rows.map((r) => <Row key={r.id} row={r} max={max} columns={columns} named={results.named} />)}</ol>
+            <h3><span class="dot" aria-hidden="true" /> {col.name} <span class="meta">{total} {unit}</span></h3>
+            <ol class="result-list">{rows.map((r) => <Row key={r.id} row={r} max={max} columns={columns} named={results.named} method={results.method} />)}</ol>
           </section>
         );
       })}
@@ -57,31 +66,40 @@ function ViewToggle({ view, onChange }: { view: View; onChange: (v: View) => voi
   return (
     <div class="segmented" role="group" aria-label="Results view">
       <button class="secondary" aria-pressed={view === "ranked"} onClick={() => onChange("ranked")}>Ranked</button>
-      <button class="secondary" aria-pressed={view === "columns"} onClick={() => onChange("columns")}>By column</button>
+      <button class="secondary" aria-pressed={view === "columns"} onClick={() => onChange("columns")}>By group</button>
     </div>
   );
 }
 
-function Summary({ results }: { results: Results }) {
+/** One sentence on how the numbers were worked out, so nobody has to guess what "4.2" or "11" means. */
+const HOW: Record<Method, string> = {
+  dots: "Each option's number is how many votes it received.",
+  points: "Each option's number is the total points people gave it.",
+  rank: "Rank order uses a Borda count: first place earns the most points and last place earns 1, and the points add up across everyone.",
+  score: "Each option's number is the average of its 1 to 5 scores. When averages are equal, the option with more ratings ranks higher.",
+};
+
+export function Summary({ results }: { results: Results }) {
   const t = results.totals;
-  if (results.restored) {
-    return (
-      <p class="hint">
-        Restored from a CSV file · {t.stars} {t.stars === 1 ? "star" : "stars"} in total · {results.named ? "Names are shown." : "Anonymous: no names are shown."}
-      </p>
-    );
-  }
+  const names = results.named ? "Names are shown." : "Anonymous: no names are shown.";
+  const verb = { dots: "voted", points: "gave points", rank: "ranked options", score: "rated options" }[results.method];
+  const total =
+    results.method === "score" ? `${t.stars} ${t.stars === 1 ? "rating" : "ratings"} in total`
+    : results.method === "points" ? `${t.stars} ${t.stars === 1 ? "point" : "points"} given`
+    : results.method === "rank" ? `${t.stars} Borda ${t.stars === 1 ? "point" : "points"}`
+    : `${t.stars} ${t.stars === 1 ? "vote" : "votes"} in total`;
   return (
-    <p class="hint">
-      {t.voted} of {t.joined} {t.joined === 1 ? "person" : "people"} starred ideas · {t.stars} {t.stars === 1 ? "star" : "stars"} in total
-      {" · "}{results.named ? "Names are shown." : "Anonymous: no names are shown."}
-    </p>
+    <>
+      <p class="hint">
+        {results.restored ? "Restored from a CSV file" : `${t.voted} of ${t.joined} ${t.joined === 1 ? "person" : "people"} ${verb}`} · {results.restored ? total.replace(" given", " in total") : total} · {names}
+      </p>
+      <p class="hint">{HOW[results.method]}</p>
+    </>
   );
 }
-
 type Run = (fn: () => Promise<unknown>) => Promise<void>;
 
-export function ResultsPanel(props: { sid: string; title: string; columns: Column[]; revealed: boolean; onPresent: () => void; run: Run }) {
+export function ResultsPanel(props: { sid: string; title: string; columns: Column[]; revealed: boolean; mode: Mode; onPresent: () => void; run: Run }) {
   const { sid, title, columns, revealed } = props;
   const [results, setResults] = useState<Results | null>(null);
   const [view, setView] = useState<View>("ranked");
@@ -98,24 +116,28 @@ export function ResultsPanel(props: { sid: string; title: string; columns: Colum
     return (
       <section class="panel" aria-labelledby="h-results">
         <h2 id="h-results">Results</h2>
-        <p>Results stay hidden, even from you, until you lock voting and then reveal them from the “Run the session” tab.</p>
+        <p>
+          {props.mode === "poll"
+            ? "Results stay hidden, even from you, until the poll closes. That happens at its closing time, or when you press “Close poll now” on the “Run the poll” tab."
+            : "Results stay hidden, even from you, until you lock voting and then reveal them from the “Run the poll” tab."}
+        </p>
       </section>
     );
   }
-  if (!results) return <section class="panel"><p>Loading results…</p></section>;
+  if (!results) return <section class="panel"><Loading label="Loading results…" /></section>;
 
   return (
     <section class="panel" aria-labelledby="h-results">
       <div class="row wrap spread">
         <h2 id="h-results">Results</h2>
         <div class="row wrap">
-          <ViewToggle view={view} onChange={setView} />
+          {hasGroups(columns) && <ViewToggle view={view} onChange={setView} />}
           <button class="primary" onClick={props.onPresent}>Present full screen</button>
           <button class="secondary" onClick={() => props.run(() => api.downloadResultsCsv(sid, title))}>Download CSV</button>
         </div>
       </div>
       <Summary results={results} />
-      <p class="hint">Download the CSV and keep it. Hosting can erase boards, and you can rebuild these results later from the home page.</p>
+      <p class="hint">Download the CSV and keep it. Hosting can erase polls, and you can rebuild these results later from the home page.</p>
       <ResultsView results={results} columns={columns} view={view} />
     </section>
   );
@@ -161,7 +183,7 @@ export function Presentation(props: { sid: string; title: string; subtitle: stri
           {subtitle && <p class="lead">{subtitle}</p>}
         </div>
         <div class="row wrap">
-          <ViewToggle view={view} onChange={setView} />
+          {hasGroups(columns) && <ViewToggle view={view} onChange={setView} />}
           <button class="secondary" ref={closeRef} onClick={onClose}>Close</button>
         </div>
       </header>
@@ -170,7 +192,7 @@ export function Presentation(props: { sid: string; title: string; subtitle: stri
           <Summary results={results} />
           <ResultsView results={results} columns={columns} view={view} />
         </>
-      ) : <p>Loading…</p>}
+      ) : <Loading label="Loading results…" />}
     </div>
   );
 }

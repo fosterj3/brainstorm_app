@@ -16,8 +16,23 @@ export class Hub {
   private roles = new Map<WebSocket, Role>();
   private alive = new WeakSet<WebSocket>();
   private timer: NodeJS.Timeout;
-  /** Called when someone connects or disconnects, so the facilitator's headcount stays current. */
+  private closed = false;
+  /** Called when someone connects or disconnects, so the organizer's headcount stays current. */
   onPresence: (sid: string) => void = () => {};
+
+  /**
+   * Tell the organizer someone came or went. This runs inside a connection event, where an error that nobody
+   * catches would stop the whole server, so a problem here (a database error, or the server shutting down) is
+   * kept to that one notification.
+   */
+  private presence(sid: string) {
+    if (this.closed) return;
+    try {
+      this.onPresence(sid);
+    } catch (e) {
+      console.error("Could not update the headcount:", e instanceof Error ? e.message : e);
+    }
+  }
 
   constructor(server: http.Server, db: DB) {
     server.on("upgrade", (req, socket, head) => {
@@ -26,9 +41,13 @@ export class Hub {
       const token = url.searchParams.get("token");
       const admin = url.searchParams.get("admin");
       let role: Role | null = null;
-      if (url.pathname === "/ws" && sid) {
-        if (admin && verifyAdmin(db, sid, admin)) role = { sid, kind: "facilitator" };
-        else if (token && getParticipant(db, sid, token)) role = { sid, kind: "participant", token };
+      try {
+        if (url.pathname === "/ws" && sid && !this.closed) {
+          if (admin && verifyAdmin(db, sid, admin)) role = { sid, kind: "facilitator" };
+          else if (token && getParticipant(db, sid, token)) role = { sid, kind: "participant", token };
+        }
+      } catch {
+        role = null; // the database could not answer: refuse this connection rather than crash
       }
       if (!role) {
         socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
@@ -40,10 +59,10 @@ export class Hub {
         ws.on("pong", () => this.alive.add(ws));
         ws.on("close", () => {
           this.roles.delete(ws);
-          this.onPresence(role!.sid);
+          this.presence(role!.sid);
         });
         ws.on("error", () => ws.terminate());
-        this.onPresence(role!.sid);
+        this.presence(role!.sid);
       });
     });
 
@@ -106,6 +125,7 @@ export class Hub {
   }
 
   close() {
+    this.closed = true;
     clearInterval(this.timer);
     for (const ws of this.roles.keys()) ws.terminate();
     this.wss.close();
