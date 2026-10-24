@@ -1,6 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
 import * as api from "./api";
-import { HowItWorks } from "./Help";
+import { homeTour, Tour, TourButton, useTour } from "./Help";
 
 /** Pull a session code out of whatever the person pasted: a code, or a full participant link. */
 export function extractCode(input: string): string {
@@ -11,14 +11,17 @@ export function extractCode(input: string): string {
 
 export function Home() {
   const boards = api.myBoards();
+  const tour = useTour("home");
   return (
     <main class="page home">
+      {tour.open && <Tour title="Quick tour" steps={homeTour} onClose={tour.close} />}
       <header class="hero">
         <h1>Silent prioritization, together</h1>
         <p class="lead">
           Build a board of ideas, send one link to your group, and see what they star. Everyone votes privately and at the same time,
           so the loudest voice does not decide.
         </p>
+        <TourButton onClick={tour.start} />
       </header>
 
       <div class="home-grid">
@@ -31,8 +34,6 @@ export function Home() {
           <p class="hint">Your lists are saved in this browser only. Keep your private facilitator links to get back in from another device.</p>
         </div>
       </div>
-
-      <HowItWorks />
     </main>
   );
 }

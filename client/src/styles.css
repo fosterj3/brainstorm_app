@@ -219,20 +219,17 @@ label.inline { display: flex; gap: 0.5rem; align-items: center; font-weight: 400
   @keyframes pulse { 50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 25%, transparent); } }
 }
 
-/* Help and guides */
-.guide { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; margin: 0.75rem 0 1rem; }
-.guide > summary { cursor: pointer; padding: 0.7rem 1rem; font-weight: 600; }
-.guide > summary:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; border-radius: 12px; }
-.guide-body { padding: 0 1rem 0.9rem; }
-.guide-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 1rem 1.1rem; margin: 1.5rem 0 0; }
-.guide-card h2 { margin: 0 0 0.2rem; font-size: 1.1rem; }
-.steps { margin: 0.5rem 0; padding-left: 1.3rem; }
-.steps li { margin: 0.45rem 0; }
-.tips { margin: 0.5rem 0 0; padding-left: 1.2rem; color: var(--muted); font-size: 0.92rem; }
-.tips li { margin: 0.3rem 0; }
-.how { margin-top: 2rem; }
-.how h2 { font-size: 1.2rem; }
-.how h3 { margin: 0 0 0.2rem; font-size: 1rem; }
-.how-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
-.how-grid .panel { margin: 0.5rem 0; }
-@media (max-width: 720px) { .how-grid { grid-template-columns: 1fr; } }
+/* Guided tour */
+.tour-btn { background: none; border: 0; padding: 0.2rem 0.3rem; color: var(--accent); font: inherit; font-size: 0.88rem; font-weight: 600; text-decoration: underline; cursor: pointer; }
+.hero .tour-btn { font-size: 0.95rem; }
+.tour-backdrop { position: fixed; inset: 0; z-index: 100; background: rgba(28, 31, 36, 0.55); display: grid; place-items: center; padding: 1rem; }
+.tour { background: var(--surface); border-radius: 14px; max-width: 460px; width: 100%; padding: 1.3rem 1.4rem 1.1rem; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3); outline: none; }
+.tour-kicker { margin: 0 0 0.3rem; color: var(--muted); font-size: 0.82rem; }
+.tour h2 { margin: 0 0 0.5rem; font-size: 1.3rem; }
+.tour-body p { margin: 0; line-height: 1.5; }
+.tour-dots { display: flex; gap: 0.35rem; margin: 1rem 0 0.9rem; }
+.tour-dots span { width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--border); }
+.tour-dots span.on { background: var(--accent); }
+.tour-actions { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; }
+.tour-nav { display: flex; gap: 0.5rem; }
+.tour-skip { background: none; border: 0; color: var(--muted); font: inherit; cursor: pointer; text-decoration: underline; padding: 0.3rem; }

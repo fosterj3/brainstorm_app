@@ -3,7 +3,7 @@ import * as api from "./api";
 import type { Board as BoardData } from "./api";
 import { Board } from "./Board";
 import { Countdown, remainingMs } from "./Countdown";
-import { ParticipantHelp, ParticipantWelcome } from "./Help";
+import { participantTour, Tour, TourButton, useTour } from "./Help";
 
 /** Make sure a subtitle ends with punctuation before more text follows it. */
 const withStop = (s: string) => (/[.!?:]$/.test(s.trim()) ? s.trim() : `${s.trim()}.`);
@@ -103,7 +103,7 @@ function JoinForm({ sid, board, onJoined }: { sid: string; board: BoardData; onJ
         {error && <p id="name-error" role="alert" class="error">{error}</p>}
         <button class="primary" type="submit" disabled={busy || !name.trim()}>Join</button>
       </form>
-      <ParticipantWelcome votes={board.settings.votesPerPerson} />
+      <p class="hint">After you join, a short tour shows you how to vote. Your picks are private.</p>
     </main>
   );
 }
@@ -115,6 +115,7 @@ function Voting(props: { sid: string; data: BoardData; setData: SetData; refresh
   const { settings, ideas, columns, me } = data;
   const votes = new Set(me!.votes);
   const [error, setError] = useState("");
+  const tour = useTour("participant");
   const used = votes.size;
   const full = used >= settings.votesPerPerson;
   const voting = settings.phase === "voting";
@@ -181,9 +182,11 @@ function Voting(props: { sid: string; data: BoardData; setData: SetData; refresh
 
   return (
     <>
+      {tour.open && <Tour title="Voting tour" steps={participantTour(settings.votesPerPerson, settings.ideasOpen && settings.phase === "setup")} onClose={tour.close} />}
       <header class="bar">
         <div class="bar-inner">
           <span class="who">{me!.name}</span>
+          <TourButton onClick={tour.start} label="Help" />
           {timer.state !== "stopped" && <Countdown timer={timer} offset={offset} />}
           <span class={`counter${full ? " full" : ""}`} role="status" aria-live="polite">
             {used} of {settings.votesPerPerson} used
@@ -196,7 +199,6 @@ function Voting(props: { sid: string; data: BoardData; setData: SetData; refresh
         <p class="lead">
           {withStop(data.board.subtitle || "Choose the ideas you feel most strongly about")} Star up to {settings.votesPerPerson}, then press Submit. Your picks are private.
         </p>
-        <ParticipantHelp votes={settings.votesPerPerson} canAdd={settings.ideasOpen && settings.phase === "setup"} />
         {settings.phase === "setup" && (
           <p class="notice">
             Waiting for the facilitator to start voting. You can read the ideas now.
