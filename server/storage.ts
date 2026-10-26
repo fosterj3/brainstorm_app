@@ -35,6 +35,11 @@ export interface Storage {
   readonly kind: string;
   /** Where the data is: a file path, or ":memory:". */
   readonly location: string;
+  /**
+   * How many times anything has been written since this was opened. It only ever goes up, so a copy can be made
+   * when it has changed and skipped when it has not.
+   */
+  readonly writes: number;
   prepare(sql: string): Statement;
   /** Run one or more statements that return nothing, such as creating tables. */
   exec(sql: string): void;
@@ -58,14 +63,36 @@ function sqlite(config: StorageConfig): Storage {
   const { file } = config;
   if (file !== ":memory:") fs.mkdirSync(path.dirname(file), { recursive: true });
   const db = new Database(file);
-  // WAL lets reads continue while a write is saved. Foreign keys make deleting a poll delete everything in it.
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
+  let writes = 0;
+  try {
+    // WAL lets reads continue while a write is saved. Foreign keys make deleting a poll delete everything in it.
+    db.pragma("journal_mode = WAL");
+    db.pragma("foreign_keys = ON");
+  } catch (e) {
+    db.close(); // a file that is not a database must not stay open (it would stay locked)
+    throw e;
+  }
   return {
     kind: "sqlite",
     location: file,
-    prepare: (sql) => db.prepare(sql) as unknown as Statement,
-    exec: (sql) => void db.exec(sql),
+    get writes() {
+      return writes;
+    },
+    prepare: (sql) => {
+      const s = db.prepare(sql);
+      return {
+        get: (...p: unknown[]) => s.get(...p),
+        all: (...p: unknown[]) => s.all(...p),
+        run: (...p: unknown[]) => {
+          writes++;
+          return s.run(...p) as RunResult;
+        },
+      };
+    },
+    exec: (sql) => {
+      writes++;
+      db.exec(sql);
+    },
     transaction: (fn) => db.transaction(fn) as unknown as () => ReturnType<typeof fn>,
     backup: async (target) => {
       fs.mkdirSync(path.dirname(path.resolve(target)), { recursive: true });

@@ -14,6 +14,7 @@ Prices and limits below were checked on 24 October 2026 from each provider's own
 | | Cost per month | Polls survive restarts? | Sleeps when idle? | Effort | Best for |
 | --- | --- | --- | --- | --- | --- |
 | **A. Free demo** (Render free) | $0 | No | Yes, after 15 minutes | None (it is what you have today) | Trying Ority, one-sitting live sessions |
+| **A+. Free demo plus automatic backup** (Backblaze B2) | $0 | **Yes**, restored from a copy saved at most a minute ago | Yes, unless pinged | About 15 minutes to set up, no code to write | Everyone who will not pay, and still needs polls to last |
 | **B. Render paid + disk** | about **$7.25** | Yes | No | Low: same site, same address | Open polls with the least change |
 | **C. Fly.io + volume** | about **$3.84** | Yes | No | Medium: uses a command-line tool | Cheapest always-on option with a disk |
 | **D. Railway Hobby** | about **$5** (my estimate) | Yes | No | Low to medium | A similar price to Render with usage-based billing |
@@ -27,7 +28,42 @@ Prices and limits below were checked on 24 October 2026 from each provider's own
 - **Making that honest:** run the service with `DEMO_NOTICE=1`. Every page then shows a banner: "Demo site. Polls here can be erased when the service restarts or goes to sleep..." with a link to the FAQ. It is off by default.
 - Custom domains work on the free plan.
 
-### B. Render paid plan with a persistent disk (recommended for most people)
+### A+. Free demo with automatic backup (use this if you will not pay)
+
+Ority can save a compressed copy of its whole database to a private storage bucket shortly after anything changes, and again when the host tells it to stop. When it starts on an empty disk (after sleeping, a restart or a deploy), it downloads the latest copy and carries on. Polls then survive sleeping, restarts, deploys and weeks of nobody visiting.
+
+- **Cost: $0.** Backblaze B2 has a permanent free allowance of 10 GB, and several 2026 sources say its sign-up page does not ask for a credit card (confirm that when you sign up). A copy of Ority's database is tens of kilobytes, so the free allowance will never be close. Uploads are free, and Ority saves at most once a minute and only when something changed.
+- **What it fixes:** polls erased by sleeping, restarts, my updates, or weeks of quiet. A poll made today is still there next month (up to the 90-day clean-up that Ority does by design).
+- **What it does not fix:**
+  1. **Up to about a minute of the newest votes can be lost** if the service is stopped without warning. Normal shutdowns (a deploy, or going to sleep) save one last copy first, as long as the host sends a stop signal, which Render does for deploys. I could not test that signal here, because Windows does not deliver it.
+  2. **The slow first visit stays** (up to a minute to wake). To avoid it, use a free uptime monitor to open `https://your-site/api/health` every 10 minutes. A single always-on free service fits Render's 750 free hours a month, but that allowance is shared by all your free services.
+  3. **Backblaze's own rules.** I could not find what Backblaze does with a free account that sits unused for a long time. Log in now and then, and read their terms.
+  4. **It needs one copy of Ority only.** Two copies saving to the same place would overwrite each other.
+- **Safety built in:** if the bucket cannot be reached when Ority starts, it stops and says why, rather than starting empty and overwriting the good copy. A damaged copy is set aside under `unusable/` and never overwritten. A problem saving a copy never crashes the site, and `/api/health` shows `backup: { enabled, lastSavedAt, ok }`.
+
+#### Set it up
+
+1. **Create the account.** Sign up for Backblaze B2 Cloud Storage (backblaze.com). Screens change, so the names below are approximate.
+2. **Create a private bucket.** Under Buckets, create one with a name nobody else has, such as `ority-backup-yourname`. Set **Files in Bucket** to **Private**. The copy contains everything in your database, including participant names and the scrambled organizer keys, so it must never be public.
+3. **Find the endpoint.** In the bucket's details, copy the **Endpoint** (for example `s3.us-west-004.backblazeb2.com`). Put `https://` in front of it.
+4. **Make a key just for this bucket.** Under App Keys, add a new key named `ority`, allow access to **only that bucket**, with read and write. Copy the **keyID** and the **applicationKey** straight away, because the long key is shown only once.
+5. **Test the details on your own computer.** Put these four lines in `.env` (it is never committed), then run `npm run backup:check`:
+   ```
+   BACKUP_S3_ENDPOINT=https://s3.us-west-004.backblazeb2.com
+   BACKUP_S3_BUCKET=ority-backup-yourname
+   BACKUP_S3_KEY_ID=your keyID
+   BACKUP_S3_SECRET=your applicationKey
+   ```
+   It saves a tiny test file, reads it back, lists it and deletes it, and says in plain words what to fix if anything fails. **Do not run the whole app on your computer with these settings:** an empty local copy would download your live polls and then save over them. For local use, also set `BACKUP_PREFIX=ority-local/`, or just remove these lines again.
+6. **Add the same four settings in Render.** Open your service, then Environment, and add `BACKUP_S3_ENDPOINT`, `BACKUP_S3_BUCKET`, `BACKUP_S3_KEY_ID` and `BACKUP_S3_SECRET`. Save, which redeploys.
+7. **Check it works.** Open `https://your-site/api/health`. After a minute it should show `"backup":{"enabled":true,"lastSavedAt":"...","ok":true}`. If it says `enabled:false`, the settings did not reach the service. If Render's logs say it is not starting because it cannot reach the bucket, re-check the endpoint and key (step 5).
+8. **Prove it survives.** Create a test poll, wait a minute, then in Render choose **Manual Deploy**. When the site is back, the poll should still be there.
+9. **Remove the demo notice.** Once step 8 works, delete the `DEMO_NOTICE` setting in Render (and the matching lines in `render.yaml`), because polls are no longer erased.
+
+#### Going back to an earlier copy
+
+Ority also keeps one copy a day for the last 14 days under `ority/daily/`. To go back: suspend the service in Render (so it cannot save over your change), in Backblaze upload that day's file again under the name `ority/latest.db.gz`, then resume the service. It starts on an empty disk and restores that copy.
+### B. Render paid plan with a persistent disk
 
 - **Cost:** the Starter web service (512 MB, 0.5 CPU) is **$7 per month**. Render's own pricing page is drawn by script and could not be read here, so that figure comes from Render's search listing and several third-party pages. A persistent disk is **$0.25 per GB per month** (Render's own article), so a 1 GB disk is $0.25. Total: about **$7.25 per month**. Render's Hobby workspace itself is $0 plus compute.
 - **What changes:** the disk keeps `data/ority.db` across restarts and deploys. The address stays the same.
@@ -62,10 +98,10 @@ Prices and limits below were checked on 24 October 2026 from each provider's own
 
 1. **If open polls matter:** go with **B** (Render paid plus a 1 GB disk, about $7.25 per month). It is the same site at the same address with nothing to migrate.
 2. **If saving about $3.40 a month matters and you are comfortable with a command line:** **C** (Fly, about $3.84 per month).
-3. **Free and honest:** keep the free service with `DEMO_NOTICE=1` so nobody is surprised. This is what was chosen.
+3. **Free and lasting:** set up A+ (steps above), then remove the demo notice. This is what was chosen. Until A+ is working, keep `DEMO_NOTICE=1` so nobody is surprised.
 4. A domain name is separate: typically about $10 to $15 per year for a `.com` (not researched here).
 
-**Decision (24 October 2026): stay on the free demo (option A) with the demo notice, and do not pay for hosting.** `render.yaml` sets `DEMO_NOTICE=1` for that reason. Nothing in `render.yaml` or `fly.toml` is set up for a paid plan. If that changes later, the steps below are ready, and the demo notice should be removed once polls are kept on a disk.
+**Decision (24 October 2026): do not pay for hosting. Stay on the free plan.** Because polls must survive days and weeks of quiet, the plan is option A+ (the free demo plus automatic backup to a free Backblaze bucket) once it is set up. Until then, `render.yaml` sets `DEMO_NOTICE=1`. `render.yaml` sets `DEMO_NOTICE=1` for that reason. Nothing in `render.yaml` or `fly.toml` is set up for a paid plan. If that changes later, the steps below are ready, and the demo notice should be removed once polls are kept on a disk.
 
 ## How to switch tiers
 
@@ -146,7 +182,7 @@ fly deploy
 
 ## Checking a deployment
 
-- **Health:** open `/api/health`. It should say `{"ok":true,"storage":"sqlite",...}`.
+- **Health:** open `/api/health`. It should say `{"ok":true,"storage":"sqlite",...}`, and `backup` shows whether copies are being saved.
 - **Load test:** `npm run loadtest -- --url https://your.domain --polls 1` runs 50 simulated people against your site. Creating polls is limited to 10 per hour per address, so keep `--polls` small, and only test a site you own. The test leaves its polls behind, and they delete themselves after 90 days.
 - **Before a live session:** open the participant link on a phone, and download a backup.
 
@@ -169,6 +205,10 @@ The test also checks that nobody receives anyone else's votes or name, that the 
 | `PORT` | Port to listen on (default 3000). |
 | `DB_PATH` | Database file. Must be on the persistent disk when hosted. |
 | `STORAGE` | Storage adapter (default `sqlite`, the only one built in). |
+| `BACKUP_S3_ENDPOINT`, `BACKUP_S3_BUCKET`, `BACKUP_S3_KEY_ID`, `BACKUP_S3_SECRET` | Save copies of the database to a private S3-compatible bucket, and restore on startup. Set all four or none. |
+| `BACKUP_S3_REGION` | Only if it cannot be read from the endpoint. |
+| `BACKUP_PREFIX` | Folder inside the bucket (default `ority/`). Use a different one for anything on your own computer. |
+| `BACKUP_INTERVAL_SECONDS` | How often to check for changes (default 60, at least 5). |
 | `TRUST_PROXY` | Set to `1` behind a host's proxy. |
 | `DEMO_NOTICE` | Set to `1` to show the demo banner on every page. |
 | `SITE_URL` | The public address, used when the site is built (canonical links, sitemap, share images). |

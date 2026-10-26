@@ -145,6 +145,8 @@ Copy `.env.example` to `.env` (gitignored). Real data lives in `data/` (gitignor
 | --- | --- |
 | `PORT` | Port to listen on (default 3000). |
 | `STORAGE` | Storage adapter (default `sqlite`, the only one built in). |
+| `BACKUP_S3_ENDPOINT`, `BACKUP_S3_BUCKET`, `BACKUP_S3_KEY_ID`, `BACKUP_S3_SECRET` | Keep polls across restarts by saving copies to a private S3-compatible bucket (Backblaze B2 has a free plan). Set all four or none. |
+| `BACKUP_PREFIX`, `BACKUP_INTERVAL_SECONDS` | Folder in the bucket (default `ority/`) and how often to check for changes (default 60 seconds). |
 | `DEMO_NOTICE` | Set to `1` to show a "Demo site" notice on every page. |
 | `SITE_URL` | The public address, used when the site is built (canonical links, sitemap, share images). |
 | `DB_PATH` | SQLite file. Default `data/ority.db`, or `data/brainstorm.db` if only that older file exists, so renaming never hides existing polls. Must be on persistent storage when hosted. |
@@ -157,11 +159,12 @@ Ority is one Node process with a SQLite file, so it needs **one copy, always on,
 | Option | Cost per month | Polls survive restarts? |
 | --- | --- | --- |
 | Free demo (Render free) | $0 | No: it sleeps after 15 minutes and its files are erased on restart |
+| **Free demo plus automatic backup** (Backblaze B2) | $0 | **Yes**, restored from a copy saved at most a minute ago |
 | Render paid plan with a 1 GB disk | about $7.25 | Yes |
 | Fly.io with a 1 GB volume | about $3.84 | Yes |
 | Railway Hobby | about $5 | Yes |
 
-The free demo is what runs today, and it is the chosen setup for now (no paid hosting). `render.yaml` sets `DEMO_NOTICE=1`, which shows a visible "Demo site" notice on every page, so nobody expects a poll to last. Nothing in `render.yaml` or `fly.toml` is set up for a paid plan; docs/HOSTING.md has the steps if that changes.
+The free demo is what runs today, and no paid hosting is the chosen direction. **To make polls survive sleeping, restarts, deploys and weeks of quiet at no cost, set up the automatic backup** (about 15 minutes, steps in docs/HOSTING.md under A+): Ority saves a copy of its database to a free private Backblaze bucket and restores it on startup. Until that is set up, `render.yaml` sets `DEMO_NOTICE=1`, which shows a visible "Demo site" notice on every page, so nobody expects a poll to last. Nothing in `render.yaml` or `fly.toml` is set up for a paid plan; docs/HOSTING.md has the steps if that changes.
 
 ### Deploying
 
@@ -191,12 +194,13 @@ On Render, a service's `onrender.com` address cannot be changed, and renaming a 
 
 ### Storage
 
-All reading and writing goes through a small interface in `server/storage.ts`. SQLite (through `better-sqlite3`) is the only backend built in. The interface is synchronous and speaks SQLite's SQL, so another engine that runs inside the server process can be added as one more adapter. The tests in `server/storage.test.ts` are the checklist for a new backend. A database that answers only over the network would need every call made asynchronous first, which is a larger change.
+All reading and writing goes through a small interface in `server/storage.ts`. When backup is set up, `server/persist.ts` saves a compressed copy of the database to a bucket whenever it has changed and restores it on an empty disk, using a small S3 client in `server/s3.ts` (no extra package). SQLite (through `better-sqlite3`) is the only backend built in. The interface is synchronous and speaks SQLite's SQL, so another engine that runs inside the server process can be added as one more adapter. The tests in `server/storage.test.ts` are the checklist for a new backend. A database that answers only over the network would need every call made asynchronous first, which is a larger change.
 
 ### Day-to-day commands
 
 ```bash
 npm run backup                       # safe copy of the database into backups/, while the app is running
+npm run backup:check                # test your backup bucket settings (saves and deletes a tiny test file)
 npm run loadtest                     # 50 simulated people vote at once, then the results are checked
 npm run loadtest -- --polls 10 --participants 20 --method mixed --restart
 ```

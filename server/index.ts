@@ -7,6 +7,9 @@ import { getResults, resultsToCsv } from "./results";
 import { restoreResults } from "./restore";
 import { HTTP_STATUS, VoteError } from "./errors";
 import { Hub } from "./hub";
+import { makeShutdown, withRetries } from "./lifecycle";
+import { restoreIfNeeded, startSnapshots, type BackupStatus } from "./persist";
+import { createS3, s3FromEnv } from "./s3";
 import { registerStatic } from "./static";
 import {
   createColumn, createIdea, deleteColumn, deleteIdea, exportBoard, importBoard, listColumns, listIdeas, listIdeasForFacilitator,
@@ -21,6 +24,8 @@ export interface AppOptions {
   now?: () => number;
   /** Set when running behind a hosting proxy so the real client IP (not the proxy's) is used for rate limits. */
   trustProxy?: boolean;
+  /** Reports how copies of the database are going, for the health check. Left out when backup is off. */
+  backupStatus?: () => BackupStatus;
   /** Show a visible "this is a demo" notice on every page. For free hosting where polls can be erased. */
   demoNotice?: boolean;
   /** Polls created per client per hour. */
@@ -85,7 +90,8 @@ export function buildApp(db: DB, opts: AppOptions = {}) {
   app.get("/api/health", async (_req, reply) => {
     try {
       db.prepare("SELECT 1 AS ok").get();
-      return { ok: true, storage: db.kind, uptimeSeconds: Math.round(process.uptime()) };
+      // A problem saving copies does not make the site unhealthy (hosting would restart it), but it is reported.
+      return { ok: true, storage: db.kind, uptimeSeconds: Math.round(process.uptime()), backup: opts.backupStatus?.() ?? { enabled: false } };
     } catch {
       return reply.code(503).send({ ok: false, storage: db.kind });
     }
@@ -370,12 +376,34 @@ export function buildApp(db: DB, opts: AppOptions = {}) {
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.meta.dirname, "index.ts");
 if (isMain) {
-  const db = openDb(defaultDbPath(process.env.DB_PATH), process.env.STORAGE ?? "sqlite");
-  const app = buildApp(db, { trustProxy: process.env.TRUST_PROXY === "1", demoNotice: process.env.DEMO_NOTICE === "1" });
+  const log = (m: string) => console.log(`[ority] ${m}`);
+  const file = defaultDbPath(process.env.DB_PATH);
+
+  // Optional: keep polls across restarts by saving copies to a private bucket (see docs/HOSTING.md).
+  const s3Config = s3FromEnv();
+  const s3 = s3Config ? createS3(s3Config) : null;
+  const prefix = process.env.BACKUP_PREFIX ?? "ority/";
+  if (s3) {
+    // If the bucket cannot be reached, stop rather than start empty and later overwrite the saved copy.
+    await withRetries("Checking the saved copy", () => restoreIfNeeded({ file, s3, prefix, log }), { log }).catch((e) => {
+      console.error(`[ority] Cannot reach the backup bucket, so not starting (the saved copy is untouched): ${e instanceof Error ? e.message : e}`);
+      process.exit(1);
+    });
+  } else {
+    log("Backup is off. Polls are lost if the disk is erased. See docs/HOSTING.md to keep them for free.");
+  }
+
+  const db = openDb(file, process.env.STORAGE ?? "sqlite");
+  const snapshots = s3 ? startSnapshots({ db, s3, prefix, log, intervalMs: Math.max(5, Number(process.env.BACKUP_INTERVAL_SECONDS ?? 60)) * 1000 }) : null;
+  const app = buildApp(db, { trustProxy: process.env.TRUST_PROXY === "1", demoNotice: process.env.DEMO_NOTICE === "1", backupStatus: snapshots?.status });
+
+  const shutdown = makeShutdown({ app, db, snapshots, log, exit: (code) => process.exit(code) });
+  process.on("SIGTERM", () => void shutdown("Told to stop (SIGTERM)"));
+  process.on("SIGINT", () => void shutdown("Interrupted (SIGINT)"));
   const dist = path.resolve(import.meta.dirname, "../dist");
   if (fs.existsSync(dist)) await registerStatic(app, dist);
   const port = Number(process.env.PORT ?? 3000);
   // A longer queue for new connections, so a crowd that arrives at once is not turned away.
   await app.listen({ port, host: "0.0.0.0", backlog: 1024 });
-  console.log(`Ority listening on http://localhost:${port} (storage: ${db.kind}, ${db.location})`);
+  console.log(`Ority listening on http://localhost:${port} (storage: ${db.kind}, ${db.location}, backup: ${snapshots ? "on" : "off"})`);
 }
