@@ -6,7 +6,7 @@ export const SITE = {
   name: "Ority",
   tagline: "Get a group to agree on what matters most.",
   /** Where the site lives today. Set SITE_URL when you build to use your own address (see the README, Hosting). */
-  defaultUrl: "https://brainstorm-app-wqbg.onrender.com",
+  defaultUrl: "https://ority.onrender.com",
   /** Shown on the privacy and terms pages. Replace these. */
   organization: "[Your organization]",
   contactEmail: "[contact email]",

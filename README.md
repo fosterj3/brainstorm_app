@@ -4,7 +4,7 @@ Ority helps a group agree on what matters most. (Formerly "brainstorm_app"; the 
 
 
 
-**Live app: https://brainstorm-app-wqbg.onrender.com**
+**Live app: https://ority.onrender.com**
 
 Open it, click **Create a poll**, and share the participant link it gives you. It runs on Render's free plan, so it sleeps after about 15 minutes without visitors (the first visit then takes up to a minute to wake it) and polls are forgotten when it sleeps or restarts. See "Hosting" below.
 
