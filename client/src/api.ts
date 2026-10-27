@@ -145,6 +145,22 @@ export function myBoards(): { id: string; title: string }[] {
     return [];
   }
 }
+/** Set by the create screen so the organizer page can show a one-time "your poll is ready" step. */
+const JUST_CREATED_KEY = "brainstorm.justCreated";
+export function markJustCreated(id: string) {
+  try { sessionStorage.setItem(JUST_CREATED_KEY, id); } catch { /* storage blocked: they just skip the welcome step */ }
+}
+/** True once for the poll that was just created, then false. */
+export function takeJustCreated(id: string): boolean {
+  try {
+    if (sessionStorage.getItem(JUST_CREATED_KEY) !== id) return false;
+    sessionStorage.removeItem(JUST_CREATED_KEY);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function rememberBoard(id: string, title: string) {
   const rest = myBoards().filter((b) => b.id !== id);
   localStorage.setItem(BOARDS_KEY, JSON.stringify([{ id, title }, ...rest].slice(0, 30)));

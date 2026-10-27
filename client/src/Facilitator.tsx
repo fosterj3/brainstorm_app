@@ -50,6 +50,7 @@ function Dashboard({ sid, onLostAccess }: { sid: string; onLostAccess: () => voi
   const [tab, setTab] = useState<Tab>(() => (sessionStorage.getItem("brainstorm.openResults") === sid ? "results" : "run"));
   useEffect(() => { sessionStorage.removeItem("brainstorm.openResults"); }, []);
   const [presenting, setPresenting] = useState(false);
+  const [welcome, setWelcome] = useState(() => api.takeJustCreated(sid)); // the one-time "your poll is ready" step
   const tour = useTour("facilitator");
 
   const refresh = () =>
@@ -135,6 +136,7 @@ function Dashboard({ sid, onLostAccess }: { sid: string; onLostAccess: () => voi
         <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
           {tab === "run" && (
             <>
+              {welcome && <ReadyPanel sid={sid} title={state.board.title} mode={settings.mode} onDone={() => setWelcome(false)} />}
               <SharePanel sid={sid} counts={counts} />
               {settings.mode === "poll"
                 ? <PollControls sid={sid} state={state} run={run} onPresent={() => setPresenting(true)} onClosed={() => setTab("results")} />
@@ -205,6 +207,46 @@ function CopyField({ id, label, value, note }: { id: string; label: string; valu
       </div>
       {note && <p class="hint">{note}</p>}
     </div>
+  );
+}
+
+/** Shown once, right after a poll is created: the link to send people, and a plain warning about the organizer link. */
+function ReadyPanel({ sid, title, mode, onDone }: { sid: string; title: string; mode: Settings["mode"]; onDone: () => void }) {
+  const [copied, setCopied] = useState<"" | "share" | "admin">("");
+  const share = `${location.origin}/s/${sid}`;
+  const admin = `${location.origin}/f/${sid}#${api.getAdminKey(sid)}`;
+  const copy = async (what: "share" | "admin", text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(what);
+      setTimeout(() => setCopied(""), 2500);
+    } catch {
+      /* clipboard blocked: the links are still shown on the page below */
+    }
+  };
+  // Opens the person's own email app with the link filled in. Nothing is sent from Ority.
+  const mail = `mailto:?subject=${encodeURIComponent(`Organizer link for my poll: ${title}`)}&body=${encodeURIComponent(
+    `This is the private link to run my poll "${title}". Keep it safe; anyone with it can run the poll.\n\n${admin}`,
+  )}`;
+  return (
+    <section class="panel ready-panel" aria-labelledby="h-ready">
+      <h2 id="h-ready">Your poll is ready</h2>
+      <p>
+        {mode === "poll"
+          ? "People can vote as soon as you send them the link. Send it by email or chat."
+          : "Send people this link. When everyone has joined, start the voting from the controls below."}
+      </p>
+      <button class="primary big" onClick={() => copy("share", share)}>{copied === "share" ? "Copied! Now paste it into an email or chat" : "Copy participant link"}</button>
+      <p class="notice warn save-warning" role="note">
+        <strong>Save your organizer link. It's the only way back into this page.</strong> If you lose it, you can't get into this poll again to see the results.
+        Bookmark it, or send it to yourself.
+      </p>
+      <div class="actions">
+        <button class="secondary" onClick={() => copy("admin", admin)}>{copied === "admin" ? "Copied" : "Copy organizer link"}</button>
+        <a class="button-link secondary" href={mail}>Email it to myself</a>
+        <button class="secondary" onClick={onDone}>Got it</button>
+      </div>
+    </section>
   );
 }
 

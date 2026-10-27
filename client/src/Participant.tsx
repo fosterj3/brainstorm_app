@@ -183,6 +183,17 @@ function Voting(props: { sid: string; data: BoardData; setData: SetData; refresh
     if (me!.submitted || !voting) clearNudge();
   }, [me!.submitted, voting]);
 
+  // Once someone has made their picks and then paused for a moment, remind them to press Submit. Any change to their
+  // picks starts the wait again; "Not yet" hides it until they change something.
+  const [remind, setRemind] = useState(false);
+  const picksKey = `${JSON.stringify(ballot)}|${order.join(",")}`;
+  useEffect(() => {
+    setRemind(false);
+    if (!voting || me!.submitted || !ready) return;
+    const id = setTimeout(() => setRemind(true), 3500);
+    return () => clearTimeout(id);
+  }, [picksKey, ready, voting, me!.submitted]);
+
   // Leaving with votes that are not submitted yet? Ask first. (Votes are saved either way; this is a prompt to finish.)
   useEffect(() => {
     if (!needsSubmit) return;
@@ -336,6 +347,16 @@ function Voting(props: { sid: string; data: BoardData; setData: SetData; refresh
           />
         )}
       </main>
+
+      {voting && remind && !urgent && !me!.submitted && (
+        <div class="submit-reminder" role="status">
+          <div class="submit-reminder-inner">
+            <p>Nice. Your picks only count once you press Submit.</p>
+            <button class="secondary" onClick={() => setRemind(false)}>Not yet</button>
+            <button class="primary" onClick={() => { setRemind(false); submit(true); }}>Submit my votes</button>
+          </div>
+        </div>
+      )}
 
       {voting && (
         <div class={`submit-bar${me!.submitted ? " done" : full || ready ? " ready" : ""}${urgent ? " urgent" : ""}`} role="region" aria-label="Submit your votes">

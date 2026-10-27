@@ -331,6 +331,24 @@ details.more { margin: 0.4rem 0; }
 details.more > summary { cursor: pointer; font-weight: 600; padding: 0.4rem 0; color: var(--brand); }
 details.more[open] > summary { margin-bottom: 0.4rem; }
 .field.reopen { margin-top: 1rem; }
+.create-step { margin: 1.4rem 0 0; padding-top: 1rem; border-top: 1px solid var(--line); }
+.step-title { display: flex; align-items: center; gap: 0.6rem; margin: 0 0 0.7rem; font-size: 1.15rem; }
+.field-error { color: var(--danger); font-weight: 600; margin: 0.2rem 0 0; font-size: 0.92rem; }
+.count-line { margin: 0.3rem 0 0; font-size: 0.9rem; color: var(--muted); }
+.count-line.need { color: var(--text); }
+.field-label { font-weight: 600; }
+.how-line { margin: 0; }
+.link-button { justify-self: start; background: none; border: 0; padding: 0.3rem 0; color: var(--brand); font-weight: 600; text-decoration: underline; cursor: pointer; font-size: 0.95rem; }
+
+/* ---- "your poll is ready" step on the organizer page, and the voter's submit reminder ---- */
+.ready-panel { border: 2px solid var(--brand); background: var(--tint-1); }
+.ready-panel h2 { margin-top: 0; }
+.ready-panel .big { font-size: 1.1rem; padding: 0.8rem 1.4rem; }
+.ready-panel .save-warning { margin: 1rem 0 0.4rem; }
+.ready-panel .actions { display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: center; margin-top: 1rem; }
+.submit-reminder { position: fixed; left: 0; right: 0; bottom: 4.6rem; z-index: 21; display: flex; justify-content: center; padding: 0 1rem; pointer-events: none; }
+.submit-reminder-inner { pointer-events: auto; display: flex; gap: 0.7rem; align-items: center; flex-wrap: wrap; justify-content: space-between; max-width: 34rem; width: 100%; background: var(--surface); border: 2px solid var(--brand); border-radius: 12px; padding: 0.7rem 0.9rem; box-shadow: 0 6px 22px rgba(0, 0, 0, 0.2); }
+.submit-reminder-inner p { margin: 0; font-weight: 600; flex: 1 1 14rem; }
 
 /* ---- website pages: header, footer, landing, templates, methods, FAQ, legal, 404 ---- */
 .skip-link { position: absolute; left: 0.5rem; top: -4rem; z-index: 200; background: var(--brand); color: #fff; padding: 0.6rem 1rem; border-radius: 0 0 8px 8px; font-weight: 600; text-decoration: none; }
