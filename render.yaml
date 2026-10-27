@@ -13,7 +13,6 @@ services:
     envVars:
       - key: TRUST_PROXY
         value: "1"
-      # Free hosting erases polls when the service sleeps or restarts, so say so on every page.
-      # Remove this when you move to a plan with a persistent disk (see docs/HOSTING.md).
-      - key: DEMO_NOTICE
-        value: "1"
+      # Polls survive restarts because they are copied to a private bucket (set the four BACKUP_S3_* values
+      # in the Render dashboard, never here). See docs/HOSTING.md. Without them, add DEMO_NOTICE=1 so every
+      # page says polls can be erased.
