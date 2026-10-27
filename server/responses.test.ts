@@ -64,12 +64,13 @@ describe("removing one person", () => {
     expect(listPeople(b.db, second.id).map((p) => p.name)).toEqual(["Zed"]);
     expect(listPeople(other.db, other.sid)).toHaveLength(3);
   });
-  it("lists names and whether they submitted, nothing else", () => {
+  it("lists names and whether they submitted, and never a token or a pick", () => {
     const b = votingPoll();
     setSubmitted(b.db, b.sid, b.people.Ann, true);
     const list = listPeople(b.db, b.sid);
-    expect(list).toEqual([{ name: "Ann", submitted: true }, { name: "Ben", submitted: false }, { name: "Cy", submitted: false }]);
-    expect(Object.keys(list[0]).sort()).toEqual(["name", "submitted"]);
+    expect(list.map((p) => [p.name, p.submitted])).toEqual([["Ann", true], ["Ben", false], ["Cy", false]]);
+    expect(Object.keys(list[0]).sort()).toEqual(["device", "joinedAt", "name", "sameNetwork", "similarNames", "submitted", "submittedAt", "tookMs"]);
+    expect(JSON.stringify(list)).not.toContain(b.people.Ann);
   });
   it("updates the headcounts", () => {
     const b = votingPoll();
@@ -213,14 +214,14 @@ describe("over HTTP", () => {
     expect((await call("GET", `/api/s/${a.sid}/admin/people`, a.admin)).body.people).toHaveLength(1);
   });
 
-  it("shows only names and submitted marks, never tokens or picks", async () => {
+  it("shows only details about people, never tokens or picks", async () => {
     const call = await boot();
     const { sid, admin } = await create(call);
     const ann = await joinAs(call, sid, "Ann");
     const ideaId = (await call("GET", `/api/s/${sid}/board`, ann)).body.ideas[0].id;
     await call("PUT", `/api/s/${sid}/votes/${ideaId}`, ann, { starred: true });
     const r = (await call("GET", `/api/s/${sid}/admin/people`, admin)).body;
-    expect(r).toEqual({ people: [{ name: "Ann", submitted: false }], allowed: true, reason: "" });
+    expect(r).toMatchObject({ people: [{ name: "Ann", submitted: false }], allowed: true, reason: "" });
     expect(JSON.stringify(r)).not.toContain(ann["x-participant-token"]);
   });
 

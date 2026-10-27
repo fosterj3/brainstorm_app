@@ -46,6 +46,7 @@ const PAIRS: [string, string, number, string][] = [
   ["amber-text", "amber-bg", 4.5, "star totals, add-idea tile"],
   ["amber-text", "surface", 4.5, "star totals on white"],
   ["warn", "amber-bg", 4.5, "paused countdown, warnings"],
+  ["warn", "surface", 4.5, "possible-repeat notes under a person's name"],
   ["ok", "ok-bg", 4.5, "submitted state, voting phase"],
   ["ok", "surface", 4.5, "success text"],
   ["danger", "surface", 4.5, "error text"],

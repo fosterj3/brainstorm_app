@@ -137,7 +137,8 @@ export function buildApp(db: DB, opts: AppOptions = {}) {
   app.post<{ Params: { sid: string } }>("/api/s/:sid/join", async (req) => {
     const sid = sidOf(req);
     const body = (req.body ?? {}) as { name?: string; token?: string };
-    const result = join(db, sid, body.name ?? "", body.token);
+    // Only a device type and a scrambled network code are kept from this, and only the organizer ever sees them.
+    const result = join(db, sid, body.name ?? "", body.token, { now: now(), ip: req.ip, userAgent: String(req.headers["user-agent"] ?? "") });
     touch(db, sid, now());
     pushCounts(sid);
     hub.toFacilitators(sid, { type: "refresh" });

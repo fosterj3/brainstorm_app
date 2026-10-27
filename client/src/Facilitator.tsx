@@ -8,7 +8,7 @@ import { facilitatorTour, Tour, TourButton, useTour } from "./Help";
 import { METHODS } from "./methods";
 import { Loading, Wordmark } from "./Site";
 import { Presentation, ResultsPanel } from "./Results";
-import { formatWhen, fromLocalInput, toLocalInput, untilText } from "./time";
+import { formatWhen, fromLocalInput, toLocalInput, tookText, untilText } from "./time";
 
 const PRESETS = [1, 2, 3, 5, 10, 15, 20, 30];
 const PHASE_LABEL = { setup: "Setting up", voting: "Voting open", locked: "Voting locked", revealed: "Results showing" } as const;
@@ -510,6 +510,19 @@ function SettingsPanel({ sid, state, run }: { sid: string; state: FacilitatorSta
   );
 }
 
+const listNames = (names: string[]) => (names.length <= 2 ? names.join(" and ") : `${names.slice(0, 2).join(", ")} and ${names.length - 2} more`);
+
+/** One line about a person: device, when they joined and submitted, and how long it took. */
+function personDetails(p: api.Person): string {
+  const parts = [
+    p.device,
+    p.joinedAt !== null ? `Joined ${formatWhen(p.joinedAt)}` : "",
+    p.submittedAt !== null ? `Submitted ${formatWhen(p.submittedAt)}` : "",
+    p.tookMs !== null ? `took ${tookText(p.tookMs)}` : "",
+  ].filter(Boolean);
+  return parts.length ? parts.join(" · ") : "No details, because this person joined before details were recorded.";
+}
+
 /** Test votes: see who joined, remove one person's votes, or clear every response and start collecting again. */
 function ResponsesPanel({ sid, state, run }: { sid: string; state: FacilitatorState; run: Run }) {
   const { counts, settings } = state;
@@ -534,14 +547,24 @@ function ResponsesPanel({ sid, state, run }: { sid: string; state: FacilitatorSt
         <p class="hint">Nobody has joined yet. If you or others try the poll before it is real, you can remove those test votes here, one person at a time or all at once.</p>
       ) : (
         <>
-          <p class="hint">Remove test votes so they are not counted. You see names only, never what anyone picked.</p>
+          <p class="hint">Remove test votes or repeats so they are not counted. You see details about each person, never what anyone picked.</p>
           {info && !info.allowed && <p class="notice warn" role="note">{info.reason}</p>}
+          {people.some((p) => p.sameNetwork.length || p.similarNames.length) && (
+            <p class="notice" role="note">
+              Some people may have voted more than once. Look for the notes under their names. They are hints, not proof: people in the same office share a network, and two people can have similar names. To keep only the latest response, remove the earlier one.
+            </p>
+          )}
           <ul class="people">
             {people.map((p) => (
               <li key={p.name}>
-                <span>{p.name}</span>
-                <span class="hint">{p.submitted ? "Submitted" : "Not submitted"}</span>
-                <button class="secondary" disabled={!info?.allowed} onClick={() => removeOne(p.name)} aria-label={`Remove ${p.name} and their votes`}>Remove</button>
+                <div class="who-row">
+                  <span class="who-name">{p.name}</span>
+                  <span class="hint">{p.submitted ? "Submitted" : "Not submitted"}</span>
+                  <button class="secondary" disabled={!info?.allowed} onClick={() => removeOne(p.name)} aria-label={`Remove ${p.name} and their votes`}>Remove</button>
+                </div>
+                <p class="hint person-meta">{personDetails(p)}</p>
+                {p.sameNetwork.length > 0 && <p class="flag">Connected from the same network as {listNames(p.sameNetwork)}.</p>}
+                {p.similarNames.length > 0 && <p class="flag">Name looks like {listNames(p.similarNames)}.</p>}
               </li>
             ))}
           </ul>

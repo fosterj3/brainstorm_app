@@ -46,7 +46,7 @@ export interface Settings {
 
 export type SettingKey =
   | "method" | "mode" | "deadline" | "share_results" | "votes_per_person" | "ideas_open" | "ideas_per_person" | "named_results" | "auto_lock"
-  | "restored" | "results_seen" | "phase" | "timer_duration_sec" | "timer_state" | "timer_ends_at" | "timer_remaining_ms";
+  | "restored" | "results_seen" | "net_salt" | "phase" | "timer_duration_sec" | "timer_state" | "timer_ends_at" | "timer_remaining_ms";
 
 export const MAX_TIMER_SEC = 4 * 60 * 60;
 export const MIN_TIMER_SEC = 10;

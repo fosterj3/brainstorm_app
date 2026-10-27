@@ -93,5 +93,11 @@ export function openDb(file: string, kind = "sqlite"): DB {
   // Rows made before it existed are all dot votes, so they take the default of 1.
   const vcols = db.prepare("PRAGMA table_info(votes)").all() as { name: string }[];
   if (!vcols.some((c) => c.name === "value")) db.exec("ALTER TABLE votes ADD COLUMN value INTEGER NOT NULL DEFAULT 1");
+  // What the organizer can see about each person: when they joined and submitted, a general device type, and a short
+  // scrambled network code (never the address itself). People who joined before these existed have no values.
+  const pcols = db.prepare("PRAGMA table_info(participants)").all() as { name: string }[];
+  for (const [col, ddl] of [["joined_at", "INTEGER"], ["submitted_at", "INTEGER"], ["device", "TEXT NOT NULL DEFAULT ''"], ["net", "TEXT NOT NULL DEFAULT ''"]] as const) {
+    if (!pcols.some((c) => c.name === col)) db.exec(`ALTER TABLE participants ADD COLUMN ${col} ${ddl}`);
+  }
   return db;
 }

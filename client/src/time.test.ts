@@ -1,9 +1,23 @@
 import { describe, expect, it } from "vitest";
-import { fromLocalInput, onlyNew, parseList, stripBullet, toLocalInput, untilText } from "./time";
+import { fromLocalInput, onlyNew, parseList, stripBullet, toLocalInput, tookText, untilText } from "./time";
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
+
+describe("tookText", () => {
+  it("speaks in seconds, minutes or hours", () => {
+    expect(tookText(0)).toBe("0 sec");
+    expect(tookText(42_000)).toBe("42 sec");
+    expect(tookText(59_400)).toBe("59 sec");
+    expect(tookText(MIN)).toBe("1 min");
+    expect(tookText(3 * MIN + 20_000)).toBe("3 min 20 sec");
+    expect(tookText(12 * MIN + 20_000)).toBe("12 min");
+    expect(tookText(HOUR)).toBe("1 h");
+    expect(tookText(2 * HOUR + 5 * MIN)).toBe("2 h 5 min");
+  });
+  it("never goes negative", () => expect(tookText(-5000)).toBe("0 sec"));
+});
 
 describe("untilText", () => {
   it("speaks in the largest sensible unit", () => {

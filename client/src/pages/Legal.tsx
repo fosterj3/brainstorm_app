@@ -29,8 +29,9 @@ export function PrivacyPage() {
 
       <h2>What Ority stores</h2>
       <p>
-        For each poll: its title, description, options, settings and results. For each participant: the name they typed and their votes. For the
-        organizer: a one-way scrambled copy of the organizer link's secret key, so Ority can check it without being able to read it back.
+        For each poll: its title, description, options, settings and results. For each participant: the name they typed, their votes, when they
+        joined and submitted, a general device type (such as "Chrome on Windows"), and a short scrambled network code. For the organizer: a one-way
+        scrambled copy of the organizer link's secret key, so Ority can check it without being able to read it back.
       </p>
       <p>Ority does not ask for or store email addresses, passwords or payment details.</p>
 
@@ -43,14 +44,21 @@ export function PrivacyPage() {
       <h2>Who can see what</h2>
       <ul>
         <li>Participants see the options and their own votes. After an open poll closes they see anonymous totals only if the organizer chose to share them.</li>
-        <li>The organizer sees only headcounts while voting is open, and the results once the poll closes. They see who voted for what only if they chose named results.</li>
+        <li>
+          The organizer sees who has joined, when each person joined and submitted, how long it took, a general device type, and a hint when two people
+          look like the same person. While voting is open they never see what anyone picked. They get the results once the poll closes, and see who
+          voted for what only if they chose named results.
+        </li>
         <li>The people who run Ority can technically reach stored data to keep the service working. [Describe your own access policy here.]</li>
       </ul>
 
       <h2>Network addresses</h2>
       <p>
         To stop one person creating a flood of polls, Ority briefly uses your network (IP) address to count how many polls come from it each hour.
-        It is held in memory and is not saved with your poll. [The company that hosts Ority may keep ordinary server logs. Describe them here.]
+        That count is held in memory and is not saved. Separately, when you join a poll, Ority saves a short code made by scrambling your network address
+        with a key that is different for every poll. It lets the organizer see that two people probably connected from the same place. It cannot be
+        turned back into your address, and it cannot be matched across polls. Your address itself is never saved with a poll, and nor is your browser's
+        full description. [The company that hosts Ority may keep ordinary server logs. Describe them here.]
       </p>
 
       <h2>How long things are kept</h2>

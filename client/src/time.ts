@@ -17,6 +17,18 @@ export function untilText(ms: number, now: number): string {
   return `in ${days} ${days === 1 ? "day" : "days"}`;
 }
 
+/** How long something took, in words: "42 sec", "3 min", "3 min 20 sec", "2 h 5 min". */
+export function tookText(ms: number): string {
+  const total = Math.max(0, Math.round(ms / 1000));
+  if (total < 60) return `${total} sec`;
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  if (minutes < 60) return seconds && minutes < 10 ? `${minutes} min ${seconds} sec` : `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `${hours} h ${rest} min` : `${hours} h`;
+}
+
 /** A time as the "YYYY-MM-DDTHH:mm" text a datetime-local box wants, in local time. */
 export function toLocalInput(ms: number): string {
   const d = new Date(ms);

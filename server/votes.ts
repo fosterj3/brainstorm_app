@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { DB } from "./db";
+import { deviceFromUserAgent, networkCode, similarNames } from "./people";
 import { VoteError } from "./errors";
 import { ballotRows, getLimits, incompleteMessage, isComplete, validateBallot, type BallotRow } from "./ballots";
 import { cleanIdeaFields, groupColumnId, MAX_IDEAS, type Idea } from "./ideas";
@@ -17,8 +18,24 @@ const lockedMessage = (db: DB, sid: string) => (getSettings(db, sid).mode === "p
 
 const squash = (v: unknown, max: number) => String(v ?? "").trim().replace(/\s+/g, " ").slice(0, max);
 
+/** What the server knows about a new person's connection. Only a device type and a scrambled network code are kept. */
+export interface JoinMeta {
+  now?: number;
+  ip?: string;
+  userAgent?: string;
+}
+
+/** The poll's own key for scrambling network addresses, made the first time it is needed. */
+function netSalt(db: DB, sid: string): string {
+  const row = db.prepare("SELECT value FROM settings WHERE session_id = ? AND key = 'net_salt'").get(sid) as { value: string } | undefined;
+  if (row?.value) return row.value;
+  const salt = randomUUID();
+  setSetting(db, sid, "net_salt", salt);
+  return salt;
+}
+
 /** Join with a name. A matching token resumes; a taken name without it is rejected. */
-export function join(db: DB, sid: string, name: string, token?: string | null): { token: string; name: string } {
+export function join(db: DB, sid: string, name: string, token?: string | null, meta: JoinMeta = {}): { token: string; name: string } {
   const clean = squash(name, 60);
   if (!clean) throw new VoteError("name_required", "Please enter your name.");
   const key = clean.toLowerCase();
@@ -33,7 +50,9 @@ export function join(db: DB, sid: string, name: string, token?: string | null): 
   if (n >= MAX_PARTICIPANTS) throw new VoteError("full", "This poll is full.");
 
   const created = randomUUID();
-  db.prepare("INSERT INTO participants (token, session_id, name, name_key) VALUES (?, ?, ?, ?)").run(created, sid, clean, key);
+  db.prepare("INSERT INTO participants (token, session_id, name, name_key, joined_at, device, net) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
+    created, sid, clean, key, meta.now ?? Date.now(), deviceFromUserAgent(meta.userAgent), networkCode(meta.ip, netSalt(db, sid)),
+  );
   return { token: created, name: clean };
 }
 
@@ -106,7 +125,7 @@ export function setBallot(db: DB, sid: string, token: string, values: unknown, n
 
     let submitted = !!(db.prepare("SELECT submitted FROM participants WHERE token = ?").get(token) as { submitted: number }).submitted;
     if (submitted && !isComplete(method, rows, limits)) {
-      db.prepare("UPDATE participants SET submitted = 0 WHERE token = ?").run(token);
+      db.prepare("UPDATE participants SET submitted = 0, submitted_at = NULL WHERE token = ?").run(token);
       submitted = false;
     }
     return { votes: getVotes(db, sid, token), ballot: getBallot(db, sid, token), submitted };
@@ -123,7 +142,7 @@ export function setSubmitted(db: DB, sid: string, token: string, submitted: bool
     if (phase !== "voting") throw new VoteError("locked", lockedMessage(db, sid));
     const limits = getLimits(db, sid);
     if (submitted && !isComplete(method, ballotRows(db, sid, token), limits)) throw new VoteError("nothing_to_submit", incompleteMessage(method, limits));
-    db.prepare("UPDATE participants SET submitted = ? WHERE token = ?").run(submitted ? 1 : 0, token);
+    db.prepare("UPDATE participants SET submitted = ?, submitted_at = ? WHERE token = ?").run(submitted ? 1 : 0, submitted ? now : null, token);
     return submitted;
   })();
 }
@@ -140,12 +159,44 @@ export function getPending(db: DB, sid: string): string[] {
   return (db.prepare("SELECT name FROM participants WHERE session_id = ? AND submitted = 0 ORDER BY name COLLATE NOCASE").all(sid) as { name: string }[]).map((r) => r.name);
 }
 
-/** Everyone who joined, with whether they pressed Submit. Names only, never what anyone picked. */
-export function listPeople(db: DB, sid: string): { name: string; submitted: boolean }[] {
-  return (db.prepare("SELECT name, submitted FROM participants WHERE session_id = ? ORDER BY name COLLATE NOCASE").all(sid) as { name: string; submitted: number }[]).map((r) => ({
-    name: r.name,
-    submitted: !!r.submitted,
-  }));
+export interface Person {
+  name: string;
+  submitted: boolean;
+  /** When they joined, or null for people who joined before this was recorded. */
+  joinedAt: number | null;
+  /** When they last pressed Submit, or null if they have not (or joined before this was recorded). */
+  submittedAt: number | null;
+  /** Milliseconds from joining to submitting. */
+  tookMs: number | null;
+  /** A general device type such as "Chrome on Windows", or "" if unknown. */
+  device: string;
+  /** Other people who connected from the same network, and people whose names look like theirs. Hints, not proof. */
+  sameNetwork: string[];
+  similarNames: string[];
+}
+
+/**
+ * Everyone who joined, for the organizer only: names, whether and when they submitted, a device type, and who else
+ * looks like the same person (same network, similar name). Never what anyone picked, and never an address.
+ */
+export function listPeople(db: DB, sid: string): Person[] {
+  const rows = db
+    .prepare("SELECT name, submitted, joined_at AS joinedAt, submitted_at AS submittedAt, device, net FROM participants WHERE session_id = ? ORDER BY name COLLATE NOCASE")
+    .all(sid) as { name: string; submitted: number; joinedAt: number | null; submittedAt: number | null; device: string; net: string }[];
+  return rows.map((r) => {
+    const others = rows.filter((o) => o !== r);
+    const submittedAt = r.submitted ? r.submittedAt : null;
+    return {
+      name: r.name,
+      submitted: !!r.submitted,
+      joinedAt: r.joinedAt,
+      submittedAt,
+      tookMs: submittedAt !== null && r.joinedAt !== null ? Math.max(0, submittedAt - r.joinedAt) : null,
+      device: r.device,
+      sameNetwork: r.net ? others.filter((o) => o.net === r.net).map((o) => o.name) : [],
+      similarNames: others.filter((o) => similarNames(r.name, o.name)).map((o) => o.name),
+    };
+  });
 }
 
 /**

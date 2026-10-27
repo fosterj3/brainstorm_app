@@ -115,13 +115,17 @@ function expectedTally(method: Method, people: Person[], optionIds: number[]) {
       count++;
       sum += method === "dots" ? 1 : method === "rank" ? Math.max(0, slots - v + 1) : v;
     }
-    return { id, count, score: method === "score" ? (count ? round2(sum / count) : 0) : sum };
+    return { id, count, sum, score: method === "score" ? (count ? round2(sum / count) : 0) : sum };
   });
-  const order = [...rows].sort((a, b) => b.score - a.score || (method === "score" ? b.count - a.count : 0) || a.id - b.id);
+  // Averages are compared as exact fractions, as the server does. Comparing the rounded values would treat two
+  // options as tied (and order them by id) when their real averages differ by less than a hundredth.
+  const higher = (a: { sum: number; count: number; score: number }, b: { sum: number; count: number; score: number }) =>
+    method === "score" ? b.sum * (a.count || 1) - a.sum * (b.count || 1) : b.score - a.score;
+  const order = [...rows].sort((a, b) => higher(a, b) || (method === "score" ? b.count - a.count : 0) || a.id - b.id);
   const rank = new Map<number, number>();
   order.forEach((r, i) => {
     const prev = order[i - 1];
-    const same = prev && prev.score === r.score && (method !== "score" || prev.count === r.count);
+    const same = prev && higher(prev, r) === 0 && (method !== "score" || prev.count === r.count);
     rank.set(r.id, same ? rank.get(prev.id)! : i + 1);
   });
   return { rows, rank };

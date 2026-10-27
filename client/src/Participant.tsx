@@ -108,7 +108,7 @@ function JoinForm({ sid, board, onJoined }: { sid: string; board: BoardData; onJ
         {error && <p id="name-error" role="alert" class="error">{error}</p>}
         <button class="primary" type="submit" disabled={busy || !name.trim()}>Join</button>
       </form>
-      <p class="hint">After you join, a short tour shows you how to vote. Your picks are private.</p>
+      <p class="hint">After you join, a short tour shows you how to vote. Your picks are private. The organizer can see your name, when you joined and submitted, and a general device type such as "Chrome on Windows", but never your address.</p>
     </main>
   );
 }

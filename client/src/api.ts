@@ -296,7 +296,18 @@ export const adminSummary = (sid: string) => call<BoardSummary>("GET", `/api/s/$
 export const adminDeleteBoard = (sid: string) => call<{ ok: true }>("DELETE", `/api/s/${sid}` + "/admin", aHeaders(sid));
 export const adminRemind = (sid: string) => call<{ reminded: number }>("POST", A(sid, "remind"), aHeaders(sid));
 /** Who joined (names and whether they submitted, never picks), and whether one person's votes may be removed now. */
-export interface People { people: { name: string; submitted: boolean }[]; allowed: boolean; reason: string }
+export interface Person {
+  name: string;
+  submitted: boolean;
+  joinedAt: number | null;
+  submittedAt: number | null;
+  tookMs: number | null;
+  device: string;
+  /** Other people who connected from the same network, and people with a similar name. Hints, not proof. */
+  sameNetwork: string[];
+  similarNames: string[];
+}
+export interface People { people: Person[]; allowed: boolean; reason: string }
 export const adminPeople = (sid: string) => call<People>("GET", A(sid, "people"), aHeaders(sid));
 export const adminRemovePerson = (sid: string, name: string) => call<{ ok: true }>("POST", A(sid, "people/remove"), aHeaders(sid), { name });
 export const adminClearResponses = (sid: string) => call<{ removed: number }>("POST", A(sid, "responses/clear"), aHeaders(sid));

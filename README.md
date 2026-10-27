@@ -93,6 +93,8 @@ CSV import: a header row with `title` (or `option`), and optionally `group`, `su
 
 **Removing test votes.** On the Run tab, the Responses panel lists who joined (names and whether they submitted, never what anyone picked). Use **Remove** to take one person and their votes out, or **Clear all responses** to start collecting again on the same link, with the options and settings kept. If the poll has anonymous results and they have already been shown, removing one person is turned off, because the totals would reveal what that person picked. Clearing everything still works.
 
+**Spotting repeats.** Each person in that panel also shows when they joined and submitted, how long it took, and a general device type such as "Chrome on Windows". Two people who connected from the same network, or whose names look alike ("Ann" and "Ann (phone)"), get a note. These are hints, not proof, so check before removing anyone. To keep only someone's latest response, remove the earlier one. Ority never stores or shows IP addresses: the network note uses a short scrambled code that is different for every poll and cannot be turned back into an address. Participants are told on the join screen what the organizer can see. People who joined before this existed show no details.
+
 **Adding options closes when voting starts.** Participants can only add their own options before you start voting, so the app reminds you before you start (with a confirmation that says so), reminds participants while they are waiting, and shows them a "closed" tile once voting has begun. You can still edit the poll yourself afterwards.
 
 Polls that nobody has used for 90 days are deleted automatically.
