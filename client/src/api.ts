@@ -295,6 +295,11 @@ export type ColumnInput = Partial<Pick<Column, "name" | "description" | "color">
 export const adminSummary = (sid: string) => call<BoardSummary>("GET", `/api/s/${sid}/admin/summary`, aHeaders(sid));
 export const adminDeleteBoard = (sid: string) => call<{ ok: true }>("DELETE", `/api/s/${sid}` + "/admin", aHeaders(sid));
 export const adminRemind = (sid: string) => call<{ reminded: number }>("POST", A(sid, "remind"), aHeaders(sid));
+/** Who joined (names and whether they submitted, never picks), and whether one person's votes may be removed now. */
+export interface People { people: { name: string; submitted: boolean }[]; allowed: boolean; reason: string }
+export const adminPeople = (sid: string) => call<People>("GET", A(sid, "people"), aHeaders(sid));
+export const adminRemovePerson = (sid: string, name: string) => call<{ ok: true }>("POST", A(sid, "people/remove"), aHeaders(sid), { name });
+export const adminClearResponses = (sid: string) => call<{ removed: number }>("POST", A(sid, "responses/clear"), aHeaders(sid));
 export const adminState = (sid: string) => call<FacilitatorState>("GET", A(sid, "state"), aHeaders(sid));
 export const adminBoard = (sid: string, patch: Partial<Pick<BoardMeta, "title" | "subtitle" | "bg">>) =>
   call<{ ok: true }>("PUT", A(sid, "board"), aHeaders(sid), patch);

@@ -18,7 +18,7 @@ import {
 import { applyAction, getSettings, reconcile, updateSettings, type Action, type Method } from "./session";
 import { createSession, deleteSession, getBoardMeta, getSummary, purgeIdle, sessionsWithDeadline, sessionsWithRunningTimer, touch, updateBoardMeta, verifyAdmin, type CreateInput } from "./sessions";
 import { getLimits } from "./ballots";
-import { addIdea, countIdeasBy, getBallot, getCounts, getParticipant, getPending, getPendingTokens, getVotes, join, setBallot, setSubmitted, setVote } from "./votes";
+import { addIdea, clearResponses, countIdeasBy, getBallot, getCounts, getParticipant, getPending, getPendingTokens, getVotes, join, listPeople, removalAllowed, removeParticipant, setBallot, setSubmitted, setVote } from "./votes";
 
 export interface AppOptions {
   now?: () => number;
@@ -246,6 +246,25 @@ export function buildApp(db: DB, opts: AppOptions = {}) {
     });
 
     fac.get<P>("/api/s/:sid/admin/summary", async (req) => getSummary(db, req.params.sid));
+
+    // Test votes: see who joined (names and whether they submitted, never picks), remove one person, or clear everything.
+    fac.get<P>("/api/s/:sid/admin/people", async (req) => ({ people: listPeople(db, req.params.sid), ...removalAllowed(db, req.params.sid) }));
+
+    fac.post<P & { Body: { name?: string } }>("/api/s/:sid/admin/people/remove", async (req) => {
+      const sid = req.params.sid;
+      removeParticipant(db, sid, String(req.body?.name ?? ""));
+      pushCounts(sid);
+      changed(sid); // anyone with the poll open is asked to join again
+      return { ok: true };
+    });
+
+    fac.post<P>("/api/s/:sid/admin/responses/clear", async (req) => {
+      const sid = req.params.sid;
+      const removed = clearResponses(db, sid);
+      pushCounts(sid);
+      changed(sid);
+      return { removed };
+    });
 
     fac.delete<P>("/api/s/:sid/admin", async (req) => {
       const sid = req.params.sid;

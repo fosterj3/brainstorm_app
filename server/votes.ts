@@ -3,7 +3,7 @@ import type { DB } from "./db";
 import { VoteError } from "./errors";
 import { ballotRows, getLimits, incompleteMessage, isComplete, validateBallot, type BallotRow } from "./ballots";
 import { cleanIdeaFields, groupColumnId, MAX_IDEAS, type Idea } from "./ideas";
-import { getSettings, reconcile } from "./session";
+import { getSettings, reconcile, resultsSeen, setSetting } from "./session";
 
 export { VoteError } from "./errors";
 export type { VoteErrorCode } from "./errors";
@@ -138,6 +138,55 @@ export function getCounts(db: DB, sid: string) {
 /** Names of participants who have not pressed Submit. Names only, never what anyone picked. */
 export function getPending(db: DB, sid: string): string[] {
   return (db.prepare("SELECT name FROM participants WHERE session_id = ? AND submitted = 0 ORDER BY name COLLATE NOCASE").all(sid) as { name: string }[]).map((r) => r.name);
+}
+
+/** Everyone who joined, with whether they pressed Submit. Names only, never what anyone picked. */
+export function listPeople(db: DB, sid: string): { name: string; submitted: boolean }[] {
+  return (db.prepare("SELECT name, submitted FROM participants WHERE session_id = ? ORDER BY name COLLATE NOCASE").all(sid) as { name: string; submitted: number }[]).map((r) => ({
+    name: r.name,
+    submitted: !!r.submitted,
+  }));
+}
+
+/**
+ * Whether the organizer may remove one person's votes right now. In a poll with anonymous results, removing someone
+ * after the results have been shown would reveal what they picked (the totals would drop by exactly their votes), so
+ * that is only allowed before anyone has seen results. Clearing everything is always allowed, because it reveals nothing.
+ */
+export function removalAllowed(db: DB, sid: string): { allowed: boolean; reason: string } {
+  const s = getSettings(db, sid);
+  if (s.namedResults || !resultsSeen(db, sid)) return { allowed: true, reason: "" };
+  return {
+    allowed: false,
+    reason: "This poll shows anonymous results, and they have already been shown. Removing one person now would reveal what they picked. You can clear all responses instead.",
+  };
+}
+
+/** Remove one person and everything they voted. Their name is free to use again. Options they suggested stay. */
+export function removeParticipant(db: DB, sid: string, name: string): void {
+  db.transaction(() => {
+    const key = squash(name, 60).toLowerCase();
+    const row = db.prepare("SELECT token FROM participants WHERE session_id = ? AND name_key = ?").get(sid, key) as { token: string } | undefined;
+    if (!row) throw new VoteError("unknown_participant", "That person is not in this poll.");
+    const rule = removalAllowed(db, sid);
+    if (!rule.allowed) throw new VoteError("bad_state", rule.reason);
+    db.prepare("DELETE FROM participants WHERE token = ? AND session_id = ?").run(row.token, sid); // their votes go with them
+  })();
+}
+
+/**
+ * Remove every response: all participants and all their votes (and any votes restored from a CSV). The poll, its options,
+ * settings and phase stay as they are, so the organizer can start collecting again on the same link. People who had the
+ * poll open are asked to join again. Returns how many people were removed.
+ */
+export function clearResponses(db: DB, sid: string): number {
+  return db.transaction(() => {
+    const n = (db.prepare("SELECT COUNT(*) AS n FROM participants WHERE session_id = ?").get(sid) as { n: number }).n;
+    db.prepare("DELETE FROM participants WHERE session_id = ?").run(sid); // votes are removed with them
+    db.prepare("UPDATE ideas SET restored_stars = 0, restored_voters = NULL WHERE session_id = ?").run(sid);
+    setSetting(db, sid, "results_seen", false); // nothing left to reveal, so removing people is safe again
+    return n;
+  })();
 }
 
 export function getPendingTokens(db: DB, sid: string): string[] {

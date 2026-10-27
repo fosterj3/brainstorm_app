@@ -139,6 +139,7 @@ function Dashboard({ sid, onLostAccess }: { sid: string; onLostAccess: () => voi
               {settings.mode === "poll"
                 ? <PollControls sid={sid} state={state} run={run} onPresent={() => setPresenting(true)} onClosed={() => setTab("results")} />
                 : <Controls sid={sid} state={state} run={run} onRevealed={() => setTab("results")} onPresent={() => setPresenting(true)} />}
+              <ResponsesPanel sid={sid} state={state} run={run} />
               <SettingsPanel sid={sid} state={state} run={run} />
               <DeletePanel sid={sid} title={state.board.title} run={run} />
             </>
@@ -505,6 +506,48 @@ function SettingsPanel({ sid, state, run }: { sid: string; state: FacilitatorSta
           </div>
         )}
       </div>
+    </section>
+  );
+}
+
+/** Test votes: see who joined, remove one person's votes, or clear every response and start collecting again. */
+function ResponsesPanel({ sid, state, run }: { sid: string; state: FacilitatorState; run: Run }) {
+  const { counts, settings } = state;
+  const [info, setInfo] = useState<api.People | null>(null);
+  useEffect(() => {
+    let live = true;
+    api.adminPeople(sid).then((p) => live && setInfo(p)).catch(() => {});
+    return () => { live = false; };
+  }, [sid, counts.joined, counts.submitted, settings.phase]);
+
+  const people = info?.people ?? [];
+  const removeOne = (name: string) =>
+    confirm(`Remove ${name} and everything they voted?\n\nThe totals will not include them. They can join again, even with the same name. This cannot be undone.`) && run(() => api.adminRemovePerson(sid, name));
+  const clearAll = () =>
+    confirm(`Clear all responses?\n\nThis removes ${counts.joined} ${counts.joined === 1 ? "person" : "people"} and every vote. The poll, its options and its settings stay, and it stays ${settings.phase === "voting" ? "open" : "as it is"}. Anyone who has the poll open will be asked to join again. This cannot be undone.`) &&
+    run(() => api.adminClearResponses(sid));
+
+  return (
+    <section class="panel" aria-labelledby="h-responses">
+      <h2 id="h-responses">Responses</h2>
+      {counts.joined === 0 ? (
+        <p class="hint">Nobody has joined yet. If you or others try the poll before it is real, you can remove those test votes here, one person at a time or all at once.</p>
+      ) : (
+        <>
+          <p class="hint">Remove test votes so they are not counted. You see names only, never what anyone picked.</p>
+          {info && !info.allowed && <p class="notice warn" role="note">{info.reason}</p>}
+          <ul class="people">
+            {people.map((p) => (
+              <li key={p.name}>
+                <span>{p.name}</span>
+                <span class="hint">{p.submitted ? "Submitted" : "Not submitted"}</span>
+                <button class="secondary" disabled={!info?.allowed} onClick={() => removeOne(p.name)} aria-label={`Remove ${p.name} and their votes`}>Remove</button>
+              </li>
+            ))}
+          </ul>
+          <p class="row"><button class="danger" onClick={clearAll}>Clear all responses</button></p>
+        </>
+      )}
     </section>
   );
 }

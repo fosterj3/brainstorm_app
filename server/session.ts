@@ -46,7 +46,7 @@ export interface Settings {
 
 export type SettingKey =
   | "method" | "mode" | "deadline" | "share_results" | "votes_per_person" | "ideas_open" | "ideas_per_person" | "named_results" | "auto_lock"
-  | "restored" | "phase" | "timer_duration_sec" | "timer_state" | "timer_ends_at" | "timer_remaining_ms";
+  | "restored" | "results_seen" | "phase" | "timer_duration_sec" | "timer_state" | "timer_ends_at" | "timer_remaining_ms";
 
 export const MAX_TIMER_SEC = 4 * 60 * 60;
 export const MIN_TIMER_SEC = 10;
@@ -112,11 +112,16 @@ export function reconcile(db: DB, sid: string, now: number): boolean {
     // time on every request, never an in-memory timer, so it holds across restarts and sleeping servers.
     if (s.mode === "poll" && s.phase === "voting" && s.deadline !== null && now >= s.deadline) {
       setSetting(db, sid, "phase", "revealed");
+      setSetting(db, sid, "results_seen", true);
       changed = true;
     }
     return changed;
   })();
 }
+
+/** True once the organizer has ever been shown this poll's results (and they have not been cleared since). */
+export const resultsSeen = (db: DB, sid: string): boolean =>
+  (db.prepare("SELECT value FROM settings WHERE session_id = ? AND key = 'results_seen'").get(sid) as { value: string } | undefined)?.value === "1";
 
 const need = (cond: boolean, message: string) => {
   if (!cond) throw new VoteError("bad_state", message);
@@ -189,6 +194,7 @@ export function applyAction(db: DB, sid: string, action: Action, now: number, se
         need(s.mode === "poll", "Only open polls can be closed this way. Use lock and reveal in a live session.");
         need(s.phase === "voting", "This poll is not open.");
         setSetting(db, sid, "phase", "revealed");
+        setSetting(db, sid, "results_seen", true);
         return;
       }
       case "reopen": {
@@ -208,6 +214,7 @@ export function applyAction(db: DB, sid: string, action: Action, now: number, se
       case "reveal": {
         need(s.phase === "locked", "Lock voting before revealing the results.");
         setSetting(db, sid, "phase", "revealed");
+        setSetting(db, sid, "results_seen", true);
         return;
       }
       case "hide": {

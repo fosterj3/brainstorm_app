@@ -91,6 +91,8 @@ CSV import: a header row with `title` (or `option`), and optionally `group`, `su
 
 **Your polls.** The home page lists the polls you have created on this device, with their status (setting up, voting, locked, results showing), how many people have joined and submitted, and when they were last used. From there you can open a poll again, copy its participant link, or delete it. You can also delete a poll from the bottom of its "Run the poll" tab. Deleting erases the poll, its options, people and votes, and participants are told it has ended. The list is stored in this browser, so keep your private organizer links to get back in from another device. People who joined a poll see it listed under "Polls you have joined".
 
+**Removing test votes.** On the Run tab, the Responses panel lists who joined (names and whether they submitted, never what anyone picked). Use **Remove** to take one person and their votes out, or **Clear all responses** to start collecting again on the same link, with the options and settings kept. If the poll has anonymous results and they have already been shown, removing one person is turned off, because the totals would reveal what that person picked. Clearing everything still works.
+
 **Adding options closes when voting starts.** Participants can only add their own options before you start voting, so the app reminds you before you start (with a confirmation that says so), reminds participants while they are waiting, and shows them a "closed" tile once voting has begun. You can still edit the poll yourself afterwards.
 
 Polls that nobody has used for 90 days are deleted automatically.
