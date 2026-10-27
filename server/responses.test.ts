@@ -5,7 +5,7 @@ import { getResults } from "./results";
 import { applyAction, getSettings, reconcile, updateSettings } from "./session";
 import { createSession } from "./sessions";
 import { newBoard } from "./testutil";
-import { VoteError, clearResponses, getCounts, getParticipant, join, listPeople, removalAllowed, removeParticipant, setSubmitted, setVote } from "./votes";
+import { VoteError, clearResponses, getCounts, getParticipant, join, listPeople, removalRisk, removeParticipant, setSubmitted, setVote } from "./votes";
 
 /**
  * Organizers often send a poll to a few people to test it first. These cover removing one person's votes or clearing
@@ -80,36 +80,41 @@ describe("removing one person", () => {
   });
 });
 
-describe("the privacy rule for anonymous results", () => {
-  it("allows removing a person until results have been shown, then refuses", () => {
+describe("the warning for anonymous results", () => {
+  it("removes freely until results have been shown, then needs an explicit acknowledgment", () => {
     const b = votingPoll();
-    expect(removalAllowed(b.db, b.sid).allowed).toBe(true);
+    expect(removalRisk(b.db, b.sid).risky).toBe(false);
     reveal(b);
-    expect(removalAllowed(b.db, b.sid).allowed).toBe(false);
+    expect(removalRisk(b.db, b.sid)).toMatchObject({ risky: true });
+    expect(removalRisk(b.db, b.sid).warning).toMatch(/shows what that person picked/);
     expect(code(() => removeParticipant(b.db, b.sid, "Ann"))).toBe("bad_state");
     expect(listPeople(b.db, b.sid)).toHaveLength(3);
+    removeParticipant(b.db, b.sid, "Ann", true);
+    expect(listPeople(b.db, b.sid).map((p) => p.name)).toEqual(["Ben", "Cy"]);
   });
-  it("still refuses after the results are hidden again and voting reopens", () => {
+  it("still asks after the results are hidden again and voting reopens, then lets the organizer remove people", () => {
     const b = votingPoll();
     reveal(b);
     applyAction(b.db, b.sid, "hide", 4);
     applyAction(b.db, b.sid, "reopen", 5);
     expect(getSettings(b.db, b.sid).phase).toBe("voting");
     expect(code(() => removeParticipant(b.db, b.sid, "Ann"))).toBe("bad_state");
+    removeParticipant(b.db, b.sid, "Ann", true);
+    expect(getParticipant(b.db, b.sid, b.people.Ann)).toBeNull();
   });
   it("applies to an open poll that closed at its deadline", () => {
     const db = openDb(":memory:");
     const made = createSession(db, { title: "Open", mode: "poll", deadline: 10_000, options: ["A", "B"] }, 0);
     join(db, made.id, "Ann");
-    expect(removalAllowed(db, made.id).allowed).toBe(true);
+    expect(removalRisk(db, made.id).risky).toBe(false);
     reconcile(db, made.id, 10_001);
     expect(getSettings(db, made.id).phase).toBe("revealed");
-    expect(removalAllowed(db, made.id).allowed).toBe(false);
+    expect(removalRisk(db, made.id).risky).toBe(true);
   });
   it("does not apply when results show names", () => {
     const b = votingPoll({ named: true });
     reveal(b);
-    expect(removalAllowed(b.db, b.sid).allowed).toBe(true);
+    expect(removalRisk(b.db, b.sid).risky).toBe(false);
     removeParticipant(b.db, b.sid, "Ben");
     expect(starsOf(b)).toMatchObject({ "Idea 1": 1, "Idea 2": 0 });
   });
@@ -117,7 +122,7 @@ describe("the privacy rule for anonymous results", () => {
     const b = votingPoll();
     reveal(b);
     clearResponses(b.db, b.sid);
-    expect(removalAllowed(b.db, b.sid).allowed).toBe(true);
+    expect(removalRisk(b.db, b.sid).risky).toBe(false);
   });
 });
 
@@ -221,7 +226,7 @@ describe("over HTTP", () => {
     const ideaId = (await call("GET", `/api/s/${sid}/board`, ann)).body.ideas[0].id;
     await call("PUT", `/api/s/${sid}/votes/${ideaId}`, ann, { starred: true });
     const r = (await call("GET", `/api/s/${sid}/admin/people`, admin)).body;
-    expect(r).toMatchObject({ people: [{ name: "Ann", submitted: false }], allowed: true, reason: "" });
+    expect(r).toMatchObject({ people: [{ name: "Ann", submitted: false }], risky: false, warning: "" });
     expect(JSON.stringify(r)).not.toContain(ann["x-participant-token"]);
   });
 
@@ -241,7 +246,7 @@ describe("over HTTP", () => {
     expect((await call("PUT", `/api/s/${sid}/votes/${ideaId}`, { "x-participant-token": again.token }, { starred: true })).status).toBe(200);
   });
 
-  it("refuses to remove one person from an anonymous poll after it closed, but clearing all still works", async () => {
+  it("asks for confirmation before removing one person from an anonymous poll after it closed, then allows it", async () => {
     const call = await boot();
     const { sid, admin } = await create(call);
     const ann = await joinAs(call, sid, "Ann");
@@ -252,12 +257,17 @@ describe("over HTTP", () => {
 
     const refused = await call("POST", `/api/s/${sid}/admin/people/remove`, admin, { name: "Ann" });
     expect(refused.status).toBe(409);
-    expect((await call("GET", `/api/s/${sid}/admin/people`, admin)).body).toMatchObject({ allowed: false });
+    expect(refused.body.message).toMatch(/Confirm to remove them anyway/);
+    expect((await call("GET", `/api/s/${sid}/admin/people`, admin)).body).toMatchObject({ risky: true });
     expect((await call("GET", `/api/s/${sid}/admin/people`, admin)).body.people).toHaveLength(2);
+    expect((await call("POST", `/api/s/${sid}/admin/people/remove`, admin, { name: "Ann", acknowledged: "yes" })).status).toBe(409); // only a real true counts
 
-    const cleared = await call("POST", `/api/s/${sid}/admin/responses/clear`, admin);
-    expect(cleared.body).toEqual({ removed: 2 });
-    expect((await call("GET", `/api/s/${sid}/admin/people`, admin)).body).toMatchObject({ people: [], allowed: true });
+    expect((await call("POST", `/api/s/${sid}/admin/people/remove`, admin, { name: "Ann", acknowledged: true })).status).toBe(200);
+    expect((await call("GET", `/api/s/${sid}/admin/people`, admin)).body.people.map((p: { name: string }) => p.name)).toEqual(["Ben"]);
+
+    const cleared = await call("POST", `/api/s/${sid}/admin/responses/clear`, admin); // never needs a confirmation
+    expect(cleared.body).toEqual({ removed: 1 });
+    expect((await call("GET", `/api/s/${sid}/admin/people`, admin)).body).toMatchObject({ people: [], risky: false });
     const results = (await call("GET", `/api/s/${sid}/admin/results`, admin)).body;
     expect(results.rows.every((row: { stars: number }) => row.stars === 0)).toBe(true);
   });

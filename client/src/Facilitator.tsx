@@ -534,8 +534,13 @@ function ResponsesPanel({ sid, state, run }: { sid: string; state: FacilitatorSt
   }, [sid, counts.joined, counts.submitted, settings.phase]);
 
   const people = info?.people ?? [];
+  const risky = !!info?.risky;
   const removeOne = (name: string) =>
-    confirm(`Remove ${name} and everything they voted?\n\nThe totals will not include them. They can join again, even with the same name. This cannot be undone.`) && run(() => api.adminRemovePerson(sid, name));
+    confirm(
+      risky
+        ? `Remove ${name} and everything they voted?\n\n${info!.warning}\n\nRemove them anyway? This cannot be undone.`
+        : `Remove ${name} and everything they voted?\n\nThe totals will not include them. They can join again, even with the same name. This cannot be undone.`,
+    ) && run(() => api.adminRemovePerson(sid, name, risky));
   const clearAll = () =>
     confirm(`Clear all responses?\n\nThis removes ${counts.joined} ${counts.joined === 1 ? "person" : "people"} and every vote. The poll, its options and its settings stay, and it stays ${settings.phase === "voting" ? "open" : "as it is"}. Anyone who has the poll open will be asked to join again. This cannot be undone.`) &&
     run(() => api.adminClearResponses(sid));
@@ -548,7 +553,7 @@ function ResponsesPanel({ sid, state, run }: { sid: string; state: FacilitatorSt
       ) : (
         <>
           <p class="hint">Remove test votes or repeats so they are not counted. You see details about each person, never what anyone picked.</p>
-          {info && !info.allowed && <p class="notice warn" role="note">{info.reason}</p>}
+          {risky && <p class="notice warn" role="note">{info!.warning} You will be asked to confirm before removing someone. Clearing all responses never has this effect.</p>}
           {people.some((p) => p.sameNetwork.length || p.similarNames.length) && (
             <p class="notice" role="note">
               Some people may have voted more than once. Look for the notes under their names. They are hints, not proof: people in the same office share a network, and two people can have similar names. To keep only the latest response, remove the earlier one.
@@ -560,7 +565,7 @@ function ResponsesPanel({ sid, state, run }: { sid: string; state: FacilitatorSt
                 <div class="who-row">
                   <span class="who-name">{p.name}</span>
                   <span class="hint">{p.submitted ? "Submitted" : "Not submitted"}</span>
-                  <button class="secondary" disabled={!info?.allowed} onClick={() => removeOne(p.name)} aria-label={`Remove ${p.name} and their votes`}>Remove</button>
+                  <button class="secondary" onClick={() => removeOne(p.name)} aria-label={`Remove ${p.name} and their votes`}>Remove</button>
                 </div>
                 <p class="hint person-meta">{personDetails(p)}</p>
                 {p.sameNetwork.length > 0 && <p class="flag">Connected from the same network as {listNames(p.sameNetwork)}.</p>}

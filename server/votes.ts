@@ -200,27 +200,31 @@ export function listPeople(db: DB, sid: string): Person[] {
 }
 
 /**
- * Whether the organizer may remove one person's votes right now. In a poll with anonymous results, removing someone
- * after the results have been shown would reveal what they picked (the totals would drop by exactly their votes), so
- * that is only allowed before anyone has seen results. Clearing everything is always allowed, because it reveals nothing.
+ * Whether removing one person's votes could reveal what they picked. In a poll with anonymous results that have already
+ * been shown, the totals would drop by exactly that person's votes, so the organizer could work out their picks. Removal
+ * is still possible (the organizer decides), but the server insists on an explicit acknowledgment, and the panel warns
+ * first. Clearing everything never reveals anything, so it never needs one.
  */
-export function removalAllowed(db: DB, sid: string): { allowed: boolean; reason: string } {
+export function removalRisk(db: DB, sid: string): { risky: boolean; warning: string } {
   const s = getSettings(db, sid);
-  if (s.namedResults || !resultsSeen(db, sid)) return { allowed: true, reason: "" };
+  if (s.namedResults || !resultsSeen(db, sid)) return { risky: false, warning: "" };
   return {
-    allowed: false,
-    reason: "This poll shows anonymous results, and they have already been shown. Removing one person now would reveal what they picked. You can clear all responses instead.",
+    risky: true,
+    warning: "This poll shows anonymous results, and they have already been shown. If you remove someone and then look at the results again, the difference shows what that person picked.",
   };
 }
 
-/** Remove one person and everything they voted. Their name is free to use again. Options they suggested stay. */
-export function removeParticipant(db: DB, sid: string, name: string): void {
+/**
+ * Remove one person and everything they voted. Their name is free to use again. Options they suggested stay. When that
+ * could reveal what they picked (see removalRisk), the caller must pass `acknowledged`.
+ */
+export function removeParticipant(db: DB, sid: string, name: string, acknowledged = false): void {
   db.transaction(() => {
     const key = squash(name, 60).toLowerCase();
     const row = db.prepare("SELECT token FROM participants WHERE session_id = ? AND name_key = ?").get(sid, key) as { token: string } | undefined;
     if (!row) throw new VoteError("unknown_participant", "That person is not in this poll.");
-    const rule = removalAllowed(db, sid);
-    if (!rule.allowed) throw new VoteError("bad_state", rule.reason);
+    const risk = removalRisk(db, sid);
+    if (risk.risky && !acknowledged) throw new VoteError("bad_state", `${risk.warning} Confirm to remove them anyway.`);
     db.prepare("DELETE FROM participants WHERE token = ? AND session_id = ?").run(row.token, sid); // their votes go with them
   })();
 }

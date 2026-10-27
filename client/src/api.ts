@@ -307,9 +307,11 @@ export interface Person {
   sameNetwork: string[];
   similarNames: string[];
 }
-export interface People { people: Person[]; allowed: boolean; reason: string }
+/** `risky` is true when removing one person could reveal what they picked (anonymous results already shown). */
+export interface People { people: Person[]; risky: boolean; warning: string }
 export const adminPeople = (sid: string) => call<People>("GET", A(sid, "people"), aHeaders(sid));
-export const adminRemovePerson = (sid: string, name: string) => call<{ ok: true }>("POST", A(sid, "people/remove"), aHeaders(sid), { name });
+export const adminRemovePerson = (sid: string, name: string, acknowledged = false) =>
+  call<{ ok: true }>("POST", A(sid, "people/remove"), aHeaders(sid), { name, acknowledged });
 export const adminClearResponses = (sid: string) => call<{ removed: number }>("POST", A(sid, "responses/clear"), aHeaders(sid));
 export const adminState = (sid: string) => call<FacilitatorState>("GET", A(sid, "state"), aHeaders(sid));
 export const adminBoard = (sid: string, patch: Partial<Pick<BoardMeta, "title" | "subtitle" | "bg">>) =>

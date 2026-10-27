@@ -49,6 +49,10 @@ export function PrivacyPage() {
           look like the same person. While voting is open they never see what anyone picked. They get the results once the poll closes, and see who
           voted for what only if they chose named results.
         </li>
+        <li>
+          In a poll with anonymous results, an organizer who removes one person after the results were shown could work out what that person picked,
+          because the totals change by exactly their votes. Ority warns the organizer and asks them to confirm first.
+        </li>
         <li>The people who run Ority can technically reach stored data to keep the service working. [Describe your own access policy here.]</li>
       </ul>
 
